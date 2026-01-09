@@ -458,6 +458,13 @@ class SIEImporter:
                         Account.number == line_data['account_number']
                     ).first()
 
+                    # Skapa konto om det saknas
+                    if not account:
+                        account = self._create_missing_account(
+                            company_id,
+                            line_data['account_number']
+                        )
+
                     if account:
                         line = TransactionLine(
                             transaction_id=transaction.id,
@@ -480,3 +487,44 @@ class SIEImporter:
 
         self.db.commit()
         return count
+
+    def _create_missing_account(self, company_id: int, account_number: str) -> Optional[Account]:
+        """Skapa saknat konto med standardnamn baserat på BAS-kontoplan"""
+        # Vanliga kontonamn enligt BAS
+        bas_names = {
+            '1910': 'Kassa',
+            '1920': 'PlusGiro',
+            '1930': 'Företagskonto',
+            '1940': 'Bankgiro',
+            '2510': 'Skatteskulder',
+            '6540': 'IT-tjänster',
+            '6570': 'Bankkostnader',
+        }
+
+        name = bas_names.get(account_number)
+        if not name:
+            # Generera namn baserat på kontoklass
+            first_digit = account_number[0] if account_number else '0'
+            class_names = {
+                '1': 'Tillgång',
+                '2': 'Skuld/EK',
+                '3': 'Intäkt',
+                '4': 'Varukostnad',
+                '5': 'Övrig kostnad',
+                '6': 'Övrig kostnad',
+                '7': 'Personalkostnad',
+                '8': 'Finansiellt',
+            }
+            name = f"{class_names.get(first_digit, 'Övrigt')} {account_number}"
+
+        account_type = self._determine_account_type(account_number)
+
+        account = Account(
+            company_id=company_id,
+            number=account_number,
+            name=name,
+            account_type=account_type
+        )
+        self.db.add(account)
+        self.db.flush()
+        return account
