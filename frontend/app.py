@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.models.base import engine, Base, SessionLocal
 from app.services.accounting import AccountingService
 from app.services.sie_import import SIEImporter
+from app.services.document_processor import DocumentProcessor, suggest_accounts
 
 # Skapa databastabeller
 Base.metadata.create_all(bind=engine)
@@ -61,7 +62,7 @@ def main():
     # Navigation
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Transaktioner", "Kontoplan", "Rapporter", "SIE-import", "Inställningar"]
+        ["Dashboard", "Skanna dokument", "Transaktioner", "Kontoplan", "Rapporter", "SIE-import", "Inställningar"]
     )
 
     st.sidebar.divider()
@@ -92,6 +93,8 @@ def main():
     # Sidinnehåll
     if page == "Dashboard":
         show_dashboard(service)
+    elif page == "Skanna dokument":
+        show_document_scanner(service, db)
     elif page == "Transaktioner":
         show_transactions(service)
     elif page == "Kontoplan":
@@ -463,6 +466,222 @@ def show_settings(service: AccountingService):
                 st.rerun()
             except Exception as e:
                 st.error(f"Fel: {e}")
+
+
+def show_document_scanner(service: AccountingService, db):
+    """Skanna dokument och skapa transaktioner automatiskt"""
+    st.title("Skanna dokument")
+
+    company_id = st.session_state.selected_company_id
+    if not company_id:
+        st.info("Välj ett företag först.")
+        return
+
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Skapa ett räkenskapsår först under Inställningar.")
+        return
+
+    fiscal_year = fiscal_years[0]
+
+    st.write("""
+    Ladda upp kvitton, fakturor eller andra dokument.
+    Systemet extraherar automatiskt datum, belopp och leverantör
+    och föreslår en bokföringstransaktion.
+    """)
+
+    # Filuppladdning
+    uploaded_file = st.file_uploader(
+        "Välj dokument",
+        type=['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+        help="Stödjer PDF, JPG, PNG och WEBP"
+    )
+
+    if uploaded_file:
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.subheader("Dokument")
+            # Visa förhandsgranskning för bilder
+            if uploaded_file.type.startswith('image/'):
+                st.image(uploaded_file, use_container_width=True)
+            else:
+                st.info(f"PDF: {uploaded_file.name}")
+
+        with col2:
+            st.subheader("Extraherad data")
+
+            # Bearbeta dokument
+            try:
+                processor = DocumentProcessor()
+                file_content = uploaded_file.read()
+                uploaded_file.seek(0)  # Reset för eventuell senare användning
+
+                with st.spinner("Analyserar dokument..."):
+                    extracted = processor.process_file(file_content, uploaded_file.name)
+
+                # Visa extraherad data
+                if extracted.raw_text:
+                    confidence_pct = int(extracted.confidence * 100)
+                    st.progress(extracted.confidence, text=f"Konfidens: {confidence_pct}%")
+
+                    # Formulär för att justera och spara
+                    with st.form("transaction_form"):
+                        st.write("**Justera och spara transaktion**")
+
+                        # Datum
+                        from datetime import date as date_type
+                        tx_date = st.date_input(
+                            "Datum",
+                            value=extracted.date or date_type.today()
+                        )
+
+                        # Leverantör/beskrivning
+                        description = st.text_input(
+                            "Beskrivning",
+                            value=extracted.description or ""
+                        )
+
+                        # Belopp
+                        total = st.number_input(
+                            "Totalbelopp (inkl moms)",
+                            value=float(extracted.total_amount or 0),
+                            min_value=0.0,
+                            step=10.0
+                        )
+
+                        # Moms
+                        vat_rate = st.selectbox(
+                            "Momssats",
+                            options=[25, 12, 6, 0],
+                            index=0 if not extracted.vat_rate else [25, 12, 6, 0].index(extracted.vat_rate)
+                        )
+
+                        # Kontoförslag
+                        suggestions = suggest_accounts(extracted)
+
+                        st.write(f"**Kategori:** {suggestions['category']}")
+
+                        # Hämta konton för dropdown
+                        accounts = service.get_accounts(company_id)
+                        account_options = {f"{a.number} - {a.name}": a.id for a in accounts}
+                        account_list = list(account_options.keys())
+
+                        # Hitta förvalda konton
+                        expense_default = next(
+                            (a for a in account_list if a.startswith(suggestions['expense_account'])),
+                            account_list[0] if account_list else None
+                        )
+                        payment_default = next(
+                            (a for a in account_list if a.startswith(suggestions['payment_account'])),
+                            account_list[0] if account_list else None
+                        )
+
+                        expense_account = st.selectbox(
+                            "Kostnadskonto",
+                            options=account_list,
+                            index=account_list.index(expense_default) if expense_default in account_list else 0
+                        )
+
+                        payment_account = st.selectbox(
+                            "Betalkonto",
+                            options=account_list,
+                            index=account_list.index(payment_default) if payment_default in account_list else 0
+                        )
+
+                        # Spara-knapp
+                        if st.form_submit_button("Skapa transaktion", type="primary"):
+                            if total > 0 and description:
+                                try:
+                                    from decimal import Decimal
+
+                                    # Beräkna belopp
+                                    total_dec = Decimal(str(total))
+                                    if vat_rate > 0:
+                                        vat_amount = total_dec * Decimal(vat_rate) / Decimal(100 + vat_rate)
+                                        net_amount = total_dec - vat_amount
+                                    else:
+                                        vat_amount = Decimal(0)
+                                        net_amount = total_dec
+
+                                    # Bygg transaktionsrader
+                                    lines = [
+                                        {
+                                            "account_id": account_options[expense_account],
+                                            "debit": net_amount.quantize(Decimal('0.01')),
+                                            "credit": Decimal(0)
+                                        },
+                                        {
+                                            "account_id": account_options[payment_account],
+                                            "debit": Decimal(0),
+                                            "credit": total_dec.quantize(Decimal('0.01'))
+                                        }
+                                    ]
+
+                                    # Lägg till moms om tillämpligt
+                                    if vat_rate > 0:
+                                        vat_account = next(
+                                            (a for a in accounts if a.number == "1610"),
+                                            None
+                                        )
+                                        if vat_account:
+                                            lines.insert(1, {
+                                                "account_id": vat_account.id,
+                                                "debit": vat_amount.quantize(Decimal('0.01')),
+                                                "credit": Decimal(0)
+                                            })
+
+                                    # Skapa transaktion
+                                    tx = service.create_transaction(
+                                        company_id=company_id,
+                                        fiscal_year_id=fiscal_year.id,
+                                        transaction_date=tx_date,
+                                        description=description,
+                                        lines=lines
+                                    )
+
+                                    # Spara verifikat
+                                    voucher_path = processor.save_voucher(file_content, uploaded_file.name)
+
+                                    st.success(f"Transaktion {tx.verification_number} skapad!")
+                                    st.info(f"Verifikat sparat: {voucher_path}")
+                                    st.rerun()
+
+                                except Exception as e:
+                                    st.error(f"Fel vid skapande: {e}")
+                            else:
+                                st.error("Fyll i belopp och beskrivning")
+
+                    # Visa råtext
+                    with st.expander("Visa extraherad text"):
+                        st.text(extracted.raw_text[:2000] if len(extracted.raw_text) > 2000 else extracted.raw_text)
+
+                else:
+                    st.warning("Kunde inte extrahera text från dokumentet. Kontrollera att det är läsbart.")
+
+            except Exception as e:
+                st.error(f"Fel vid dokumentbearbetning: {e}")
+
+    st.divider()
+
+    # Information
+    with st.expander("Om dokumentskanning"):
+        st.write("""
+        **Funktioner:**
+        - OCR (optisk teckenigenkänning) för bilder och skannade PDF:er
+        - Automatisk extraktion av datum, belopp och moms
+        - Identifiering av vanliga leverantörer
+        - Förslag på bokföringskonton baserat på leverantör
+
+        **Tips för bästa resultat:**
+        - Använd tydliga, välbelysta bilder
+        - Se till att texten är läsbar och inte suddig
+        - PDF:er med inbäddad text ger bäst resultat
+
+        **Systemkrav:**
+        - Tesseract OCR måste vara installerat för bildskanning
+        - Installera med: `brew install tesseract tesseract-lang`
+        """)
 
 
 def show_sie_import(db):
