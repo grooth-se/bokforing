@@ -1,0 +1,141 @@
+{
+  "name": "BAS 2024",
+  "description": "Standard BAS-kontoplan för svenska företag",
+  "accounts": [
+    {"number": "1010", "name": "Utvecklingsutgifter", "type": "Tillgång"},
+    {"number": "1110", "name": "Byggnader", "type": "Tillgång"},
+    {"number": "1210", "name": "Maskiner och inventarier", "type": "Tillgång"},
+    {"number": "1220", "name": "Inventarier och verktyg", "type": "Tillgång"},
+    {"number": "1230", "name": "Datorer", "type": "Tillgång"},
+    {"number": "1250", "name": "Bilar och transportmedel", "type": "Tillgång"},
+
+    {"number": "1310", "name": "Andelar i koncernföretag", "type": "Tillgång"},
+    {"number": "1380", "name": "Andra långfristiga fordringar", "type": "Tillgång"},
+
+    {"number": "1410", "name": "Varulager", "type": "Tillgång"},
+    {"number": "1460", "name": "Varor på väg", "type": "Tillgång"},
+
+    {"number": "1510", "name": "Kundfordringar", "type": "Tillgång"},
+    {"number": "1580", "name": "Övriga kortfristiga fordringar", "type": "Tillgång"},
+
+    {"number": "1610", "name": "Ingående moms", "type": "Tillgång", "vat_code": "input"},
+    {"number": "1630", "name": "Avräkning skatter", "type": "Tillgång"},
+    {"number": "1650", "name": "Momsfordran", "type": "Tillgång"},
+
+    {"number": "1710", "name": "Förutbetalda kostnader", "type": "Tillgång"},
+    {"number": "1790", "name": "Upplupna intäkter", "type": "Tillgång"},
+
+    {"number": "1910", "name": "Kassa", "type": "Tillgång"},
+    {"number": "1920", "name": "PlusGiro", "type": "Tillgång"},
+    {"number": "1930", "name": "Företagskonto/Checkkonto", "type": "Tillgång"},
+    {"number": "1940", "name": "Bankgiro", "type": "Tillgång"},
+
+    {"number": "2010", "name": "Eget kapital", "type": "Eget kapital"},
+    {"number": "2013", "name": "Övriga egna uttag", "type": "Eget kapital"},
+    {"number": "2018", "name": "Övriga egna insättningar", "type": "Eget kapital"},
+    {"number": "2019", "name": "Årets resultat", "type": "Eget kapital"},
+
+    {"number": "2081", "name": "Aktiekapital", "type": "Eget kapital"},
+    {"number": "2091", "name": "Balanserad vinst eller förlust", "type": "Eget kapital"},
+    {"number": "2099", "name": "Årets resultat", "type": "Eget kapital"},
+
+    {"number": "2310", "name": "Banklån", "type": "Skuld"},
+    {"number": "2350", "name": "Andra långfristiga skulder", "type": "Skuld"},
+
+    {"number": "2410", "name": "Leverantörsskulder", "type": "Skuld"},
+
+    {"number": "2510", "name": "Skatteskulder", "type": "Skuld"},
+    {"number": "2610", "name": "Utgående moms 25%", "type": "Skuld", "vat_code": "25"},
+    {"number": "2620", "name": "Utgående moms 12%", "type": "Skuld", "vat_code": "12"},
+    {"number": "2630", "name": "Utgående moms 6%", "type": "Skuld", "vat_code": "6"},
+    {"number": "2640", "name": "Ingående moms", "type": "Skuld", "vat_code": "input"},
+    {"number": "2650", "name": "Redovisningskonto för moms", "type": "Skuld"},
+
+    {"number": "2710", "name": "Personalskatter", "type": "Skuld"},
+    {"number": "2730", "name": "Sociala avgifter", "type": "Skuld"},
+    {"number": "2731", "name": "Avräkning sociala avgifter", "type": "Skuld"},
+
+    {"number": "2910", "name": "Upplupna löner", "type": "Skuld"},
+    {"number": "2920", "name": "Upplupna semesterlöner", "type": "Skuld"},
+    {"number": "2940", "name": "Upplupna sociala avgifter", "type": "Skuld"},
+    {"number": "2990", "name": "Övriga upplupna kostnader", "type": "Skuld"},
+
+    {"number": "3010", "name": "Försäljning varor 25% moms", "type": "Intäkt", "vat_code": "25"},
+    {"number": "3011", "name": "Försäljning varor 12% moms", "type": "Intäkt", "vat_code": "12"},
+    {"number": "3012", "name": "Försäljning varor 6% moms", "type": "Intäkt", "vat_code": "6"},
+    {"number": "3040", "name": "Försäljning tjänster 25% moms", "type": "Intäkt", "vat_code": "25"},
+    {"number": "3041", "name": "Försäljning tjänster momsfri", "type": "Intäkt", "vat_code": "0"},
+    {"number": "3050", "name": "Fakturerade kostnader", "type": "Intäkt"},
+    {"number": "3100", "name": "Försäljning inom Sverige", "type": "Intäkt"},
+    {"number": "3200", "name": "Försäljning till EU", "type": "Intäkt"},
+    {"number": "3300", "name": "Försäljning utanför EU", "type": "Intäkt"},
+    {"number": "3590", "name": "Övriga sidointäkter", "type": "Intäkt"},
+    {"number": "3740", "name": "Öres- och kronutjämning", "type": "Intäkt"},
+    {"number": "3960", "name": "Valutakursvinster", "type": "Intäkt"},
+
+    {"number": "4010", "name": "Inköp varor 25% moms", "type": "Kostnad", "vat_code": "25"},
+    {"number": "4011", "name": "Inköp varor 12% moms", "type": "Kostnad", "vat_code": "12"},
+    {"number": "4012", "name": "Inköp varor 6% moms", "type": "Kostnad", "vat_code": "6"},
+    {"number": "4500", "name": "Övriga inköp", "type": "Kostnad"},
+    {"number": "4960", "name": "Valutakursförluster", "type": "Kostnad"},
+
+    {"number": "5010", "name": "Lokalhyra", "type": "Kostnad"},
+    {"number": "5020", "name": "El för lokaler", "type": "Kostnad"},
+    {"number": "5060", "name": "Städning och renhållning", "type": "Kostnad"},
+    {"number": "5090", "name": "Övriga lokalkostnader", "type": "Kostnad"},
+
+    {"number": "5200", "name": "Hyra av anläggningstillgångar", "type": "Kostnad"},
+    {"number": "5250", "name": "Hyra av datorer", "type": "Kostnad"},
+    {"number": "5300", "name": "Energikostnader", "type": "Kostnad"},
+
+    {"number": "5410", "name": "Förbrukningsinventarier", "type": "Kostnad"},
+    {"number": "5420", "name": "Programvaror", "type": "Kostnad"},
+    {"number": "5460", "name": "Förbrukningsmaterial", "type": "Kostnad"},
+    {"number": "5480", "name": "Arbetskläder", "type": "Kostnad"},
+
+    {"number": "5500", "name": "Reparation och underhåll", "type": "Kostnad"},
+    {"number": "5610", "name": "Kostnader för transportmedel", "type": "Kostnad"},
+    {"number": "5800", "name": "Resekostnader", "type": "Kostnad"},
+    {"number": "5900", "name": "Reklam och PR", "type": "Kostnad"},
+
+    {"number": "6000", "name": "Övriga försäljningskostnader", "type": "Kostnad"},
+    {"number": "6100", "name": "Kontorsmaterial", "type": "Kostnad"},
+    {"number": "6200", "name": "Tele och post", "type": "Kostnad"},
+    {"number": "6210", "name": "Telefon", "type": "Kostnad"},
+    {"number": "6230", "name": "Datakommunikation", "type": "Kostnad"},
+    {"number": "6250", "name": "Porto", "type": "Kostnad"},
+
+    {"number": "6300", "name": "Företagsförsäkringar", "type": "Kostnad"},
+    {"number": "6400", "name": "Förvaltningskostnader", "type": "Kostnad"},
+    {"number": "6410", "name": "Styrelsearvoden", "type": "Kostnad"},
+    {"number": "6500", "name": "Övriga externa tjänster", "type": "Kostnad"},
+    {"number": "6530", "name": "Redovisningstjänster", "type": "Kostnad"},
+    {"number": "6540", "name": "IT-tjänster", "type": "Kostnad"},
+    {"number": "6550", "name": "Konsultarvoden", "type": "Kostnad"},
+
+    {"number": "6570", "name": "Bankkostnader", "type": "Kostnad"},
+    {"number": "6900", "name": "Övriga externa kostnader", "type": "Kostnad"},
+
+    {"number": "7010", "name": "Löner kollektivanställda", "type": "Kostnad"},
+    {"number": "7210", "name": "Löner tjänstemän", "type": "Kostnad"},
+    {"number": "7220", "name": "Löner VD och styrelse", "type": "Kostnad"},
+    {"number": "7310", "name": "Sjuklön", "type": "Kostnad"},
+    {"number": "7330", "name": "Semesterlöner", "type": "Kostnad"},
+
+    {"number": "7410", "name": "Arbetsgivaravgifter", "type": "Kostnad"},
+    {"number": "7510", "name": "Pensionskostnader", "type": "Kostnad"},
+    {"number": "7610", "name": "Utbildning", "type": "Kostnad"},
+    {"number": "7690", "name": "Övriga personalkostnader", "type": "Kostnad"},
+
+    {"number": "7820", "name": "Avskrivningar byggnader", "type": "Kostnad"},
+    {"number": "7830", "name": "Avskrivningar maskiner", "type": "Kostnad"},
+    {"number": "7832", "name": "Avskrivningar inventarier", "type": "Kostnad"},
+    {"number": "7834", "name": "Avskrivningar datorer", "type": "Kostnad"},
+
+    {"number": "8310", "name": "Ränteintäkter", "type": "Intäkt"},
+    {"number": "8410", "name": "Räntekostnader", "type": "Kostnad"},
+    {"number": "8420", "name": "Räntekostnader banklån", "type": "Kostnad"},
+    {"number": "8910", "name": "Skatt på årets resultat", "type": "Kostnad"},
+    {"number": "8999", "name": "Årets resultat", "type": "Eget kapital"}
+  ]
+}
