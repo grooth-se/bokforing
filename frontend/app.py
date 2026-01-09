@@ -686,102 +686,207 @@ def show_document_scanner(service: AccountingService, db):
 
 def show_sie_import(db):
     """Visa SIE-import"""
+    from app.services.sie_import import SIEParser
+    from app.services.accounting import AccountingService
+
     st.title("SIE-import")
 
     st.write("""
-    Importera bokföringsdata från SIE-filer (Standard Import Export).
-    SIE är ett svenskt standardformat som används av de flesta bokföringsprogram
-    som Fortnox, Visma, Speedledger m.fl.
+    Importera bokföringsdata från SIE-filer. Ladda upp en fil för att
+    förhandsgranska innehållet innan import.
     """)
 
-    company_id = st.session_state.selected_company_id
+    # Filuppladdning
+    uploaded_file = st.file_uploader(
+        "Välj SIE-fil (.se, .si, .sie)",
+        type=['se', 'si', 'sie'],
+        key="sie_upload"
+    )
 
-    tab1, tab2 = st.tabs(["Importera till befintligt företag", "Skapa nytt företag"])
+    if uploaded_file:
+        try:
+            # Läs och parsa filen
+            content = uploaded_file.read().decode('cp437', errors='replace')
+            parser = SIEParser()
+            data = parser.parse(content)
 
-    with tab1:
-        if not company_id:
-            st.warning("Välj ett företag först för att importera till det.")
-        else:
-            uploaded_file = st.file_uploader(
-                "Välj SIE-fil",
-                type=['se', 'si', 'sie'],
-                key="sie_existing"
+            st.success(f"Fil laddad: {uploaded_file.name}")
+
+            # Visa förhandsgranskning
+            st.subheader("Förhandsgranskning")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("**Företagsinformation från filen:**")
+                st.write(f"- Namn: {data.company_name or '(ej angivet)'}")
+                st.write(f"- Org.nr: {data.org_number or '(ej angivet)'}")
+                if data.fiscal_year_start and data.fiscal_year_end:
+                    st.write(f"- Räkenskapsår: {data.fiscal_year_start} - {data.fiscal_year_end}")
+
+            with col2:
+                st.write("**Innehåll:**")
+                st.write(f"- Konton: {len(data.accounts)}")
+                st.write(f"- Ingående balanser: {len(data.opening_balances)}")
+                st.write(f"- Transaktioner: {len(data.transactions)}")
+
+            st.divider()
+
+            # Importalternativ
+            st.subheader("Importalternativ")
+
+            service = AccountingService(db)
+            companies = service.get_all_companies()
+
+            # Val: nytt eller befintligt företag
+            import_option = st.radio(
+                "Välj importmetod:",
+                ["Skapa nytt företag från SIE-filen", "Importera till befintligt företag"],
+                index=0
             )
 
-            if uploaded_file:
-                if st.button("Importera", key="import_existing"):
-                    try:
-                        content = uploaded_file.read().decode('cp437', errors='replace')
-                        importer = SIEImporter(db)
-                        stats = importer.import_file(content, company_id=company_id)
+            if import_option == "Skapa nytt företag från SIE-filen":
+                with st.form("new_company_import"):
+                    st.write("**Justera företagsinformation:**")
 
-                        st.success("Import klar!")
-                        st.write(f"- Konton importerade: {stats['accounts_imported']}")
-                        st.write(f"- Transaktioner importerade: {stats['transactions_imported']}")
+                    company_name = st.text_input(
+                        "Företagsnamn",
+                        value=data.company_name or "Nytt företag"
+                    )
 
-                        if stats['errors']:
-                            st.warning("Varningar:")
-                            for error in stats['errors']:
-                                st.write(f"  - {error}")
+                    org_number = st.text_input(
+                        "Organisationsnummer",
+                        value=data.org_number or "000000-0000"
+                    )
 
-                        st.rerun()
+                    accounting_standard = st.selectbox(
+                        "Redovisningsstandard",
+                        ["K2", "K3"],
+                        index=0
+                    )
 
-                    except Exception as e:
-                        st.error(f"Importfel: {e}")
+                    st.write("**Räkenskapsår:**")
+                    from datetime import date as date_type
 
-    with tab2:
-        st.write("Skapa ett nytt företag baserat på SIE-filens innehåll.")
+                    if data.fiscal_year_start and data.fiscal_year_end:
+                        default_start = data.fiscal_year_start
+                        default_end = data.fiscal_year_end
+                    else:
+                        default_start = date_type(date_type.today().year, 1, 1)
+                        default_end = date_type(date_type.today().year, 12, 31)
 
-        uploaded_file = st.file_uploader(
-            "Välj SIE-fil",
-            type=['se', 'si', 'sie'],
-            key="sie_new"
-        )
+                    col_start, col_end = st.columns(2)
+                    with col_start:
+                        fy_start = st.date_input("Startdatum", value=default_start)
+                    with col_end:
+                        fy_end = st.date_input("Slutdatum", value=default_end)
 
-        if uploaded_file:
-            if st.button("Importera som nytt företag", key="import_new"):
-                try:
-                    content = uploaded_file.read().decode('cp437', errors='replace')
-                    importer = SIEImporter(db)
-                    stats = importer.import_file(content, company_id=None)
+                    if st.form_submit_button("Importera och skapa företag", type="primary"):
+                        try:
+                            # Skapa företag manuellt
+                            company = service.create_company(
+                                name=company_name,
+                                org_number=org_number,
+                                accounting_standard=accounting_standard
+                            )
 
-                    st.success("Import klar! Nytt företag skapat.")
-                    st.write(f"- Konton importerade: {stats['accounts_imported']}")
-                    st.write(f"- Transaktioner importerade: {stats['transactions_imported']}")
+                            # Skapa räkenskapsår
+                            fiscal_year = service.create_fiscal_year(
+                                company.id, fy_start, fy_end
+                            )
 
-                    if stats['errors']:
-                        st.warning("Varningar:")
-                        for error in stats['errors']:
-                            st.write(f"  - {error}")
+                            # Importera data till företaget
+                            importer = SIEImporter(db)
+                            stats = importer.import_file(content, company_id=company.id)
 
-                    st.rerun()
+                            st.success(f"Import klar! Företaget '{company_name}' skapat.")
+                            st.write(f"- Konton importerade: {stats['accounts_imported']}")
+                            st.write(f"- Transaktioner importerade: {stats['transactions_imported']}")
 
-                except Exception as e:
-                    st.error(f"Importfel: {e}")
+                            # Uppdatera valt företag
+                            st.session_state.selected_company_id = company.id
+                            st.rerun()
 
-    st.divider()
+                        except Exception as e:
+                            st.error(f"Importfel: {e}")
 
-    # Information om SIE-format
-    with st.expander("Om SIE-formatet"):
-        st.write("""
-        **SIE (Standard Import Export)** är ett svenskt standardformat för
-        överföring av bokföringsdata mellan olika system.
+            else:  # Importera till befintligt företag
+                if not companies:
+                    st.warning("Inga företag finns. Välj 'Skapa nytt företag' ovan.")
+                else:
+                    with st.form("existing_company_import"):
+                        company_options = {c.name: c.id for c in companies}
+                        selected_company = st.selectbox(
+                            "Välj företag",
+                            options=list(company_options.keys())
+                        )
 
-        **Versioner som stöds:**
-        - SIE4 (komplett bokföring med verifikationer)
+                        st.warning(
+                            "OBS: Befintliga transaktioner behålls. "
+                            "Dubbletter kan uppstå om filen redan importerats."
+                        )
 
-        **Innehåll som importeras:**
-        - Företagsinformation (namn, organisationsnummer)
-        - Kontoplan
-        - Räkenskapsår
-        - Ingående balanser
-        - Verifikationer med konteringsrader
+                        if st.form_submit_button("Importera till valt företag", type="primary"):
+                            try:
+                                company_id = company_options[selected_company]
+                                importer = SIEImporter(db)
+                                stats = importer.import_file(content, company_id=company_id)
 
-        **Exportera från andra system:**
-        - Fortnox: Inställningar > Importera/Exportera > Exportera SIE-fil
-        - Visma: Administration > Import/Export > SIE-export
-        - Speedledger: Inställningar > Export > SIE4
-        """)
+                                st.success(f"Import klar till '{selected_company}'!")
+                                st.write(f"- Konton importerade: {stats['accounts_imported']}")
+                                st.write(f"- Transaktioner importerade: {stats['transactions_imported']}")
+
+                                st.session_state.selected_company_id = company_id
+                                st.rerun()
+
+                            except Exception as e:
+                                st.error(f"Importfel: {e}")
+
+            # Visa detaljer
+            with st.expander("Visa konton i filen"):
+                if data.accounts:
+                    for acc in data.accounts[:50]:
+                        st.write(f"  {acc.number}: {acc.name}")
+                    if len(data.accounts) > 50:
+                        st.write(f"  ... och {len(data.accounts) - 50} till")
+                else:
+                    st.write("Inga konton i filen")
+
+            with st.expander("Visa transaktioner i filen"):
+                if data.transactions:
+                    for tx in data.transactions[:20]:
+                        st.write(f"  Ver {tx.verification_number}: {tx.description} ({tx.date})")
+                    if len(data.transactions) > 20:
+                        st.write(f"  ... och {len(data.transactions) - 20} till")
+                else:
+                    st.write("Inga transaktioner i filen")
+
+        except Exception as e:
+            st.error(f"Kunde inte läsa filen: {e}")
+
+    else:
+        # Visa info när ingen fil är uppladdad
+        st.info("Ladda upp en SIE-fil för att komma igång.")
+
+        with st.expander("Om SIE-formatet"):
+            st.write("""
+            **SIE (Standard Import Export)** är ett svenskt standardformat för
+            överföring av bokföringsdata mellan olika system.
+
+            **Stödda filtyper:** .se, .si, .sie
+
+            **Innehåll som importeras:**
+            - Företagsinformation (namn, organisationsnummer)
+            - Kontoplan
+            - Räkenskapsår
+            - Ingående balanser
+            - Verifikationer med konteringsrader
+
+            **Exportera från andra system:**
+            - Fortnox: Inställningar > Importera/Exportera > Exportera SIE-fil
+            - Visma: Administration > Import/Export > SIE-export
+            - Speedledger: Inställningar > Export > SIE4
+            """)
 
 
 if __name__ == "__main__":
