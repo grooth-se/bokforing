@@ -3,10 +3,14 @@ SIE-import - Parser för SIE4-format
 
 SIE (Standard Import Export) är ett svenskt standardformat för
 att överföra bokföringsdata mellan olika system.
+
+Stödjer:
+- SIE typ 4 (komplett bokföring)
+- Filer med ändelse .se, .si, .sie
 """
 import re
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
@@ -63,14 +67,29 @@ class SIEParser:
         """Parsa SIE-filinnehåll"""
         self.data = SIEData()
 
-        # SIE använder CP437 eller Latin-1 kodning
+        # Normalisera radbrytningar (hantera både \r\n och \n)
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
         lines = content.split('\n')
 
         current_verification = None
+        in_verification_block = False
 
         for line in lines:
             line = line.strip()
             if not line or line.startswith('//'):
+                continue
+
+            # Kolla om raden börjar med { (start av verifikationsblock)
+            if line == '{':
+                in_verification_block = True
+                continue
+
+            # Kolla om raden är } (slut på verifikationsblock)
+            if line == '}' or line.startswith('}'):
+                if current_verification and current_verification.lines:
+                    self.data.transactions.append(current_verification)
+                current_verification = None
+                in_verification_block = False
                 continue
 
             # Identifiera taggar
@@ -86,34 +105,39 @@ class SIEParser:
                 self._parse_opening_balance(line)
             elif line.startswith('#VER'):
                 current_verification = self._parse_verification(line)
+                # Kolla om { är på samma rad
+                if '{' in line:
+                    in_verification_block = True
             elif line.startswith('#TRANS') and current_verification:
                 self._parse_transaction_line(line, current_verification)
-            elif line.startswith('}'):
-                if current_verification and current_verification.lines:
-                    self.data.transactions.append(current_verification)
-                current_verification = None
+
+        # Hantera fall där filen slutar utan avslutande }
+        if current_verification and current_verification.lines:
+            self.data.transactions.append(current_verification)
 
         return self.data
 
     def _parse_company_name(self, line: str):
         """Parsa #FNAMN "Företagsnamn"""
-        match = re.search(r'"([^"]+)"', line)
+        match = re.search(r'"([^"]*)"', line)
         if match:
             self.data.company_name = match.group(1)
 
     def _parse_org_number(self, line: str):
         """Parsa #ORGNR orgnummer"""
-        parts = line.split()
-        if len(parts) >= 2:
-            self.data.org_number = parts[1].replace('"', '')
+        # Format kan vara: #ORGNR 556123-4567 eller #ORGNR "556123-4567"
+        match = re.search(r'#ORGNR\s+"?([0-9-]+)"?', line)
+        if match:
+            self.data.org_number = match.group(1)
 
     def _parse_fiscal_year(self, line: str):
         """Parsa #RAR 0 20240101 20241231"""
-        parts = line.split()
-        if len(parts) >= 4:
+        # Hitta alla datum i formatet YYYYMMDD
+        dates = re.findall(r'\b(20\d{6})\b', line)
+        if len(dates) >= 2:
             try:
-                start_str = parts[2]
-                end_str = parts[3]
+                start_str = dates[0]
+                end_str = dates[1]
                 self.data.fiscal_year_start = date(
                     int(start_str[:4]), int(start_str[4:6]), int(start_str[6:8])
                 )
@@ -125,44 +149,63 @@ class SIEParser:
 
     def _parse_account(self, line: str):
         """Parsa #KONTO 1930 "Företagskonto\""""
-        parts = line.split('"')
-        if len(parts) >= 2:
-            number_part = parts[0].replace('#KONTO', '').strip()
-            name = parts[1]
-            self.data.accounts.append(SIEAccount(number=number_part, name=name))
+        # Format: #KONTO kontonummer "kontonamn"
+        match = re.match(r'#KONTO\s+(\d+)\s+"([^"]*)"', line)
+        if match:
+            self.data.accounts.append(SIEAccount(
+                number=match.group(1),
+                name=match.group(2)
+            ))
 
     def _parse_opening_balance(self, line: str):
-        """Parsa #IB 0 1930 50000.00"""
-        parts = line.split()
-        if len(parts) >= 4:
+        """Parsa #IB 0 1930 50000.00 eller #IB 0 1930 -50000.00"""
+        # Format: #IB årsnr kontonummer belopp
+        match = re.match(r'#IB\s+(-?\d+)\s+(\d+)\s+(-?[\d.,]+)', line)
+        if match:
             try:
-                account_number = parts[2]
-                balance = Decimal(parts[3].replace(',', '.'))
+                account_number = match.group(2)
+                balance_str = match.group(3).replace(',', '.').replace(' ', '')
+                balance = Decimal(balance_str)
                 self.data.opening_balances[account_number] = balance
-            except (ValueError, IndexError):
+            except (InvalidOperation, ValueError):
                 pass
 
     def _parse_verification(self, line: str) -> SIETransaction:
-        """Parsa #VER A 1 20240115 "Beskrivning\""""
-        parts = line.split('"')
+        """
+        Parsa #VER serie vernr datum "beskrivning"
 
-        # Extrahera verifikationsnummer och datum
-        number_parts = parts[0].replace('#VER', '').strip().split()
+        Exempel:
+        - #VER A 1 20240115 "Försäljning"
+        - #VER "" 1 20240115 "Test" 20240115
+        - #VER A 1 20240115 "Test" {
+        """
+        # Ta bort eventuell { i slutet
+        line = line.replace('{', '').strip()
 
         ver_number = 1
         ver_date = date.today()
+        description = "Importerad"
 
-        if len(number_parts) >= 3:
+        # Hitta verifikationsnummer (siffror efter serie)
+        ver_match = re.search(r'#VER\s+\S+\s+(\d+)', line)
+        if ver_match:
+            ver_number = int(ver_match.group(1))
+
+        # Hitta datum (YYYYMMDD)
+        date_match = re.search(r'\b(20\d{6})\b', line)
+        if date_match:
             try:
-                ver_number = int(number_parts[1])
-                date_str = number_parts[2]
+                date_str = date_match.group(1)
                 ver_date = date(
                     int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8])
                 )
-            except (ValueError, IndexError):
+            except ValueError:
                 pass
 
-        description = parts[1] if len(parts) >= 2 else "Importerad"
+        # Hitta beskrivning (text inom citattecken)
+        desc_match = re.search(r'"([^"]*)"', line)
+        if desc_match:
+            description = desc_match.group(1) or "Importerad"
 
         return SIETransaction(
             verification_number=ver_number,
@@ -171,14 +214,38 @@ class SIEParser:
         )
 
     def _parse_transaction_line(self, line: str, verification: SIETransaction):
-        """Parsa #TRANS 1930 {} 1000.00"""
-        parts = line.replace('#TRANS', '').strip().split()
+        """
+        Parsa #TRANS kontonr {dimensioner} belopp
 
-        if len(parts) >= 3:
+        Exempel:
+        - #TRANS 1930 {} 1000.00
+        - #TRANS 1930 {} -1000.00
+        - #TRANS 1930 {"1" "100"} 1000.00 "" "" 0
+        - #TRANS 1930 {} 1000,00
+        """
+        # Ta bort #TRANS prefix
+        line = line.replace('#TRANS', '').strip()
+
+        # Extrahera kontonummer (första nummersekvensen)
+        account_match = re.match(r'(\d+)', line)
+        if not account_match:
+            return
+
+        account_number = account_match.group(1)
+
+        # Hitta belopp - leta efter tal efter {} eller tom {}
+        # Mönster: {} följt av ett tal (möjligen negativt, med . eller , som decimal)
+        amount_match = re.search(r'\{[^}]*\}\s*(-?[\d\s]+[.,]?\d*)', line)
+
+        if not amount_match:
+            # Alternativt format utan {}: kontonummer följt av belopp
+            amount_match = re.search(r'^\d+\s+(-?[\d\s]+[.,]?\d*)', line)
+
+        if amount_match:
             try:
-                account_number = parts[0]
-                # Hoppa över {} dimensioner
-                amount_str = parts[-1].replace(',', '.')
+                amount_str = amount_match.group(1)
+                # Rensa och normalisera
+                amount_str = amount_str.replace(' ', '').replace(',', '.')
                 amount = Decimal(amount_str)
 
                 if amount >= 0:
@@ -193,7 +260,7 @@ class SIEParser:
                         'debit': Decimal(0),
                         'credit': abs(amount)
                     })
-            except (ValueError, IndexError):
+            except (InvalidOperation, ValueError):
                 pass
 
 
@@ -368,6 +435,10 @@ class SIEImporter:
 
         for tx_data in transactions:
             try:
+                # Kontrollera att transaktionen har rader
+                if not tx_data.lines:
+                    continue
+
                 # Skapa transaktion
                 transaction = Transaction(
                     company_id=company_id,
@@ -380,6 +451,7 @@ class SIEImporter:
                 self.db.flush()
 
                 # Skapa transaktionsrader
+                lines_added = 0
                 for line_data in tx_data.lines:
                     account = self.db.query(Account).filter(
                         Account.company_id == company_id,
@@ -394,8 +466,13 @@ class SIEImporter:
                             credit=line_data['credit']
                         )
                         self.db.add(line)
+                        lines_added += 1
 
-                count += 1
+                if lines_added > 0:
+                    count += 1
+                else:
+                    # Ta bort transaktionen om inga rader kunde läggas till
+                    self.db.delete(transaction)
 
             except Exception:
                 # Hoppa över felaktiga transaktioner
