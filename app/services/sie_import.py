@@ -451,12 +451,14 @@ class SIEImporter:
                 # negativa (förlust) och ska behålla sitt tecken!
                 first_digit = account_number[0] if account_number else '0'
 
-                # Resultatkonton som kan vara negativa (förlust)
+                # Resultatkonton (209x, 206x) kräver teckenväxling
+                # I SIE: negativt = vinst (kredit), positivt = förlust (debet)
+                # I vårt system: positivt = kreditsaldo, negativt = debetsaldo
                 result_accounts = ['2068', '2069', '2091', '2098', '2099']
 
                 if account_number in result_accounts:
-                    # Resultatkonton: behåll tecken (negativ = förlust)
-                    account.opening_balance = balance
+                    # Vänd tecknet: SIE -100000 (vinst) → +100000, SIE +50000 (förlust) → -50000
+                    account.opening_balance = -balance
                 elif first_digit in ['2', '3']:
                     # Övriga skulder, EK och intäkter: SIE har ofta negativa värden
                     # Vi lagrar absolut värde (positivt)
