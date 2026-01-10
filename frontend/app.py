@@ -169,31 +169,37 @@ def show_dashboard(service: AccountingService):
     accounts = service.get_accounts(company_id)
 
     # Beräkna nyckeltal
-    # Tillgångar (1xxx)
+    # OBS: Saldon från SIE har olika tecken:
+    # - Tillgångar (1xxx): positiva (debetsaldo)
+    # - Skulder/EK (2xxx): negativa (kreditsaldo) - behöver vändas för visning
+    # - Intäkter (3xxx): negativa (kreditsaldo) - behöver vändas för visning
+    # - Kostnader (4-8xxx): positiva (debetsaldo)
+
+    # Tillgångar (1xxx) - positiva värden
     total_assets = sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith('1')
     )
 
-    # Eget kapital (20xx-21xx)
-    total_equity = sum(
+    # Eget kapital (20xx-21xx) - negativa i systemet, vänd tecken
+    total_equity = -sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith(('20', '21'))
     )
 
-    # Skulder (22xx-29xx)
-    total_liabilities = sum(
+    # Skulder (22xx-29xx) - negativa i systemet, vänd tecken
+    total_liabilities = -sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith(('22', '23', '24', '25', '26', '27', '28', '29'))
     )
 
-    # Intäkter (3xxx)
-    total_revenue = sum(
+    # Intäkter (3xxx) - negativa i systemet, vänd tecken
+    total_revenue = -sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith('3')
     )
 
-    # Kostnader (4xxx-8xxx)
+    # Kostnader (4xxx-8xxx) - positiva värden
     total_expenses = sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number[0] in '45678'
@@ -210,7 +216,8 @@ def show_dashboard(service: AccountingService):
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith(('19', '17', '18'))  # Kassa, bank, kortfristiga placeringar
     )
-    short_term_liabilities = sum(
+    # Kortfristiga skulder - vänd tecken
+    short_term_liabilities = -sum(
         service.get_account_balance(a.id)
         for a in accounts if a.number.startswith(('24', '25', '26', '27', '28', '29'))
     )
@@ -317,28 +324,49 @@ def show_dashboard(service: AccountingService):
                 st.info("Ingen intäkts-/kostnadsdata att visa")
 
     with tab2:
-        st.subheader("Utveckling per månad")
+        st.subheader("Utveckling över tid")
 
-        # Beräkna månatliga summor
+        # Välj tidsperiod
+        time_period = st.radio(
+            "Visa per",
+            ["Månad", "År"],
+            horizontal=True,
+            key="trend_period"
+        )
+
+        # Beräkna summor
         if transactions:
             from collections import defaultdict
-            monthly_data = defaultdict(lambda: {'revenue': Decimal(0), 'expenses': Decimal(0), 'balance': Decimal(0)})
 
-            for tx in transactions:
-                month_key = tx.transaction_date.strftime('%Y-%m')
-                for line in tx.lines:
-                    acc_num = line.account.number
-                    if acc_num.startswith('3'):
-                        monthly_data[month_key]['revenue'] += line.credit - line.debit
-                    elif acc_num[0] in '45678':
-                        monthly_data[month_key]['expenses'] += line.debit - line.credit
-                    elif acc_num.startswith('1'):
-                        monthly_data[month_key]['balance'] += line.debit - line.credit
+            if time_period == "Månad":
+                period_data = defaultdict(lambda: {'revenue': Decimal(0), 'expenses': Decimal(0), 'balance': Decimal(0)})
+                for tx in transactions:
+                    period_key = tx.transaction_date.strftime('%Y-%m')
+                    for line in tx.lines:
+                        acc_num = line.account.number
+                        if acc_num.startswith('3'):
+                            period_data[period_key]['revenue'] += line.credit - line.debit
+                        elif acc_num[0] in '45678':
+                            period_data[period_key]['expenses'] += line.debit - line.credit
+                        elif acc_num.startswith('1'):
+                            period_data[period_key]['balance'] += line.debit - line.credit
+            else:  # År
+                period_data = defaultdict(lambda: {'revenue': Decimal(0), 'expenses': Decimal(0), 'balance': Decimal(0)})
+                for tx in transactions:
+                    period_key = tx.transaction_date.strftime('%Y')
+                    for line in tx.lines:
+                        acc_num = line.account.number
+                        if acc_num.startswith('3'):
+                            period_data[period_key]['revenue'] += line.credit - line.debit
+                        elif acc_num[0] in '45678':
+                            period_data[period_key]['expenses'] += line.debit - line.credit
+                        elif acc_num.startswith('1'):
+                            period_data[period_key]['balance'] += line.debit - line.credit
 
-            # Sortera månader
-            months = sorted(monthly_data.keys())
-            revenues = [float(monthly_data[m]['revenue']) for m in months]
-            expenses = [float(monthly_data[m]['expenses']) for m in months]
+            # Sortera perioder
+            periods = sorted(period_data.keys())
+            revenues = [float(period_data[p]['revenue']) for p in periods]
+            expenses = [float(period_data[p]['expenses']) for p in periods]
             results = [r - e for r, e in zip(revenues, expenses)]
 
             # Kumulativt resultat
@@ -353,21 +381,21 @@ def show_dashboard(service: AccountingService):
 
             fig_trend.add_trace(go.Bar(
                 name='Intäkter',
-                x=months,
+                x=periods,
                 y=revenues,
                 marker_color='#28A745'
             ))
 
             fig_trend.add_trace(go.Bar(
                 name='Kostnader',
-                x=months,
+                x=periods,
                 y=expenses,
                 marker_color='#DC3545'
             ))
 
             fig_trend.add_trace(go.Scatter(
                 name='Kumulativt resultat',
-                x=months,
+                x=periods,
                 y=cumulative_result,
                 mode='lines+markers',
                 line=dict(color='#FFC107', width=3),
@@ -376,6 +404,7 @@ def show_dashboard(service: AccountingService):
 
             fig_trend.update_layout(
                 barmode='group',
+                xaxis_title='Period' if time_period == "År" else 'Månad',
                 yaxis_title='Belopp (kr)',
                 yaxis2=dict(
                     title='Kumulativt resultat (kr)',
@@ -387,6 +416,18 @@ def show_dashboard(service: AccountingService):
             )
 
             st.plotly_chart(fig_trend, use_container_width=True)
+
+            # Visa tabell med data
+            if st.checkbox("Visa detaljerad data", key="show_trend_data"):
+                import pandas as pd
+                df_trend = pd.DataFrame({
+                    'Period': periods,
+                    'Intäkter': [f"{r:,.0f} kr" for r in revenues],
+                    'Kostnader': [f"{e:,.0f} kr" for e in expenses],
+                    'Resultat': [f"{r:,.0f} kr" for r in results],
+                    'Kumulativt': [f"{c:,.0f} kr" for c in cumulative_result]
+                })
+                st.dataframe(df_trend, use_container_width=True, hide_index=True)
         else:
             st.info("Inga transaktioner att visa")
 
@@ -1181,7 +1222,14 @@ def show_report_export_buttons(db, report_type: str, company_id: int, fiscal_yea
                 data, _, _ = report_generator.generate_report_with_export(
                     internal_type, company_id, fiscal_year_id, "html", **kwargs
                 )
-                st.components.v1.html(data.decode('utf-8'), height=800, scrolling=True)
+                # Visa förhandsgranskning i full bredd med scrollning
+                st.markdown("---")
+                st.subheader("Förhandsgranskning")
+                st.components.v1.html(
+                    f'<div style="width:100%; overflow-x:auto;">{data.decode("utf-8")}</div>',
+                    height=800,
+                    scrolling=True
+                )
 
     except Exception as e:
         st.error(f"Fel vid export: {e}")
