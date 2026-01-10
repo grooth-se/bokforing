@@ -231,15 +231,88 @@ def show_transactions(service: AccountingService):
         if transactions:
             st.write(f"Visar {len(transactions)} transaktioner")
             for tx in reversed(transactions):
-                with st.expander(f"Ver {tx.verification_number}: {tx.description} ({tx.transaction_date})"):
-                    st.write(f"**Datum:** {tx.transaction_date}")
-                    st.write(f"**Beskrivning:** {tx.description}")
-                    st.write("**Konteringar:**")
+                # Kontrollera om transaktionen balanserar
+                balance_status = "✓" if tx.is_balanced else "⚠️ OBALANSERAD"
 
+                with st.expander(f"Ver {tx.verification_number}: {tx.description} ({tx.transaction_date}) {balance_status}"):
+                    col_info, col_actions = st.columns([3, 1])
+
+                    with col_info:
+                        st.write(f"**Datum:** {tx.transaction_date}")
+                        st.write(f"**Beskrivning:** {tx.description}")
+                        st.write(f"**Total:** D {tx.total_debit:,.2f} / K {tx.total_credit:,.2f}")
+
+                    with col_actions:
+                        if st.button("🗑️ Ta bort transaktion", key=f"del_tx_{tx.id}", type="secondary"):
+                            if service.delete_transaction(tx.id):
+                                st.success("Transaktion borttagen!")
+                                st.rerun()
+
+                    st.write("**Konteringsrader:**")
+
+                    # Visa varje rad med redigeringsmöjlighet
                     for line in tx.lines:
-                        debit_str = f"{line.debit:,.2f}" if line.debit > 0 else ""
-                        credit_str = f"{line.credit:,.2f}" if line.credit > 0 else ""
-                        st.write(f"  {line.account.number} {line.account.name}: D {debit_str} / K {credit_str}")
+                        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
+
+                        with col1:
+                            st.write(f"{line.account.number} {line.account.name}")
+                        with col2:
+                            debit_str = f"{line.debit:,.2f}" if line.debit and line.debit > 0 else "-"
+                            st.write(f"D: {debit_str}")
+                        with col3:
+                            credit_str = f"{line.credit:,.2f}" if line.credit and line.credit > 0 else "-"
+                            st.write(f"K: {credit_str}")
+                        with col4:
+                            # Tom plats för layout
+                            pass
+                        with col5:
+                            if st.button("❌", key=f"del_line_{line.id}", help="Ta bort rad"):
+                                if service.delete_transaction_line(line.id):
+                                    st.success("Rad borttagen!")
+                                    st.rerun()
+
+                    # Lägg till ny rad
+                    st.divider()
+                    st.write("**Lägg till rad:**")
+                    col_acc, col_d, col_k, col_btn = st.columns([3, 2, 2, 1])
+
+                    with col_acc:
+                        new_account = st.selectbox(
+                            "Konto",
+                            [""] + list(account_options.keys()),
+                            key=f"new_acc_{tx.id}",
+                            label_visibility="collapsed"
+                        )
+                    with col_d:
+                        new_debit = st.number_input(
+                            "Debet",
+                            min_value=0.0,
+                            step=100.0,
+                            key=f"new_deb_{tx.id}",
+                            label_visibility="collapsed"
+                        )
+                    with col_k:
+                        new_credit = st.number_input(
+                            "Kredit",
+                            min_value=0.0,
+                            step=100.0,
+                            key=f"new_cred_{tx.id}",
+                            label_visibility="collapsed"
+                        )
+                    with col_btn:
+                        if st.button("➕", key=f"add_line_{tx.id}", help="Lägg till rad"):
+                            if new_account and (new_debit > 0 or new_credit > 0):
+                                from decimal import Decimal
+                                service.add_transaction_line(
+                                    transaction_id=tx.id,
+                                    account_id=account_options[new_account],
+                                    debit=Decimal(str(new_debit)),
+                                    credit=Decimal(str(new_credit))
+                                )
+                                st.success("Rad tillagd!")
+                                st.rerun()
+                            else:
+                                st.error("Välj konto och ange belopp")
         else:
             st.info("Inga transaktioner ännu för detta räkenskapsår")
 

@@ -269,6 +269,116 @@ class AccountingService:
             .scalar() or 0
         )
 
+    def get_transaction(self, transaction_id: int) -> Optional[Transaction]:
+        """Hämta en specifik transaktion"""
+        return self.db.query(Transaction).filter(Transaction.id == transaction_id).first()
+
+    def delete_transaction_line(self, line_id: int) -> bool:
+        """
+        Ta bort en konteringsrad från en transaktion
+
+        Returnerar True om raden togs bort, False om den inte hittades.
+        OBS: Kontrollerar inte om transaktionen fortfarande balanserar.
+        """
+        line = self.db.query(TransactionLine).filter(TransactionLine.id == line_id).first()
+        if line:
+            self.db.delete(line)
+            self.db.commit()
+            return True
+        return False
+
+    def add_transaction_line(
+        self,
+        transaction_id: int,
+        account_id: int,
+        debit: Decimal = Decimal(0),
+        credit: Decimal = Decimal(0),
+        description: str = None
+    ) -> Optional[TransactionLine]:
+        """
+        Lägg till en konteringsrad till en befintlig transaktion
+
+        Returnerar den nya raden, eller None om transaktionen inte hittades.
+        """
+        transaction = self.get_transaction(transaction_id)
+        if not transaction:
+            return None
+
+        line = TransactionLine(
+            transaction_id=transaction_id,
+            account_id=account_id,
+            debit=debit,
+            credit=credit,
+            description=description
+        )
+        self.db.add(line)
+        self.db.commit()
+        self.db.refresh(line)
+        return line
+
+    def update_transaction_line(
+        self,
+        line_id: int,
+        account_id: int = None,
+        debit: Decimal = None,
+        credit: Decimal = None,
+        description: str = None
+    ) -> Optional[TransactionLine]:
+        """
+        Uppdatera en befintlig konteringsrad
+        """
+        line = self.db.query(TransactionLine).filter(TransactionLine.id == line_id).first()
+        if not line:
+            return None
+
+        if account_id is not None:
+            line.account_id = account_id
+        if debit is not None:
+            line.debit = debit
+        if credit is not None:
+            line.credit = credit
+        if description is not None:
+            line.description = description
+
+        self.db.commit()
+        self.db.refresh(line)
+        return line
+
+    def delete_transaction(self, transaction_id: int) -> bool:
+        """
+        Ta bort en hel transaktion med alla dess rader
+
+        Returnerar True om transaktionen togs bort, False om den inte hittades.
+        """
+        transaction = self.get_transaction(transaction_id)
+        if transaction:
+            self.db.delete(transaction)
+            self.db.commit()
+            return True
+        return False
+
+    def update_transaction(
+        self,
+        transaction_id: int,
+        description: str = None,
+        transaction_date: date = None
+    ) -> Optional[Transaction]:
+        """
+        Uppdatera transaktionsmetadata (beskrivning, datum)
+        """
+        transaction = self.get_transaction(transaction_id)
+        if not transaction:
+            return None
+
+        if description is not None:
+            transaction.description = description
+        if transaction_date is not None:
+            transaction.transaction_date = transaction_date
+
+        self.db.commit()
+        self.db.refresh(transaction)
+        return transaction
+
     # === SALDON ===
 
     def get_account_balance(
