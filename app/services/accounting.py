@@ -389,11 +389,18 @@ class AccountingService:
         """
         Beräkna saldo för ett konto
 
-        För tillgångar och kostnader: debet - kredit + IB
-        För skulder, eget kapital och intäkter: kredit - debet + IB
+        Enkel formel för alla konton:
+        saldo = opening_balance + debit - credit
 
-        OBS: opening_balance hanteras med hänsyn till tecken från SIE-import.
-        SIE använder negativa värden för kreditkonton (skulder, EK, intäkter).
+        SIE-konvention:
+        - Positiv opening_balance = debetsaldo (tillgångar, kostnader)
+        - Negativ opening_balance = kreditsaldo (skulder, EK, intäkter)
+
+        Resultat:
+        - Positivt saldo = debetsaldo
+        - Negativt saldo = kreditsaldo
+
+        Summan av alla balansposter (1xxx + 2xxx) ska bli 0.
         """
         account = self.db.query(Account).filter(Account.id == account_id).first()
         if not account:
@@ -415,27 +422,12 @@ class AccountingService:
         total_debit = Decimal(str(result[0]))
         total_credit = Decimal(str(result[1]))
 
-        # Hämta ingående balans med korrekt teckenhantering
+        # Ingående balans direkt från SIE (positiv = debet, negativ = kredit)
         ib = account.opening_balance or Decimal(0)
 
-        # Resultatkonton som kan ha negativa saldon (förlust)
-        result_accounts = ['2068', '2069', '2091', '2098', '2099']
-        is_result_account = account.number in result_accounts
-
-        # Tillgångar och kostnader har normalt debetsaldo
-        if account.account_type in [AccountType.ASSET, AccountType.EXPENSE]:
-            # IB kan vara negativ om det är en ackumulerad avskrivning etc.
-            return total_debit - total_credit + ib
-        # Skulder, EK och intäkter har normalt kreditsaldo
-        else:
-            # Resultatkonton (2099 etc.) kan ha negativ IB (förlust) - behåll tecken
-            if is_result_account:
-                # För resultatkonton: negativ IB = förlust (minskar EK)
-                return total_credit - total_debit + ib
-            # Övriga EK/skulder: om IB är negativ (från SIE), konvertera till positiv
-            elif ib < 0:
-                ib = abs(ib)
-            return total_credit - total_debit + ib
+        # Enkel formel för alla konton:
+        # saldo = IB + debet - kredit
+        return ib + total_debit - total_credit
 
     def get_trial_balance(
         self,
@@ -445,9 +437,15 @@ class AccountingService:
         """
         Generera råbalans (saldon för alla konton)
 
-        Saldot placeras i rätt kolumn baserat på:
-        - Normalt: debetsaldo för tillgångar/kostnader, kreditsaldo för skulder/EK/intäkter
-        - Om saldot är negativt placeras det i motsatt kolumn som positivt värde
+        Saldot returneras med:
+        - balance: signerat värde (positiv = debet, negativ = kredit)
+        - debit/credit: absolut värde i rätt kolumn för visning
+
+        Konvention (från SIE):
+        - Positivt saldo = debetsaldo (tillgångar, kostnader)
+        - Negativt saldo = kreditsaldo (skulder, EK, intäkter)
+
+        Summan av alla balansposter (1xxx + 2xxx) ska bli 0.
         """
         accounts = self.get_accounts(company_id)
         balances = []
@@ -455,32 +453,19 @@ class AccountingService:
         for account in accounts:
             balance = self.get_account_balance(account.id, end_date)
             if balance != 0:
-                is_debit_account = account.account_type in [AccountType.ASSET, AccountType.EXPENSE]
-
-                # Hantera negativa saldon - placera i motsatt kolumn
+                # Enkel regel: positiv = debet-kolumn, negativ = kredit-kolumn
                 if balance >= 0:
-                    if is_debit_account:
-                        debit_val = balance
-                        credit_val = Decimal(0)
-                    else:
-                        debit_val = Decimal(0)
-                        credit_val = balance
+                    debit_val = balance
+                    credit_val = Decimal(0)
                 else:
-                    # Negativt saldo - placera i motsatt kolumn som positivt
-                    if is_debit_account:
-                        # Tillgång med negativt saldo → kredit
-                        debit_val = Decimal(0)
-                        credit_val = abs(balance)
-                    else:
-                        # Skuld med negativt saldo → debet
-                        debit_val = abs(balance)
-                        credit_val = Decimal(0)
+                    debit_val = Decimal(0)
+                    credit_val = abs(balance)
 
                 balances.append({
                     "account_number": account.number,
                     "account_name": account.name,
                     "account_type": account.account_type.value,
-                    "balance": balance,
+                    "balance": balance,  # Signerat värde
                     "debit": debit_val,
                     "credit": credit_val
                 })

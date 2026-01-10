@@ -155,7 +155,19 @@ class ReportGenerator:
         return template.render(context)
 
     def _get_financial_data(self, company_id: int, fiscal_year: FiscalYear) -> Dict:
-        """Hämta finansiell data för rapporter"""
+        """
+        Hämta finansiell data för rapporter
+
+        Balansräkning (baserat på SIE-konvention):
+        - Tillgångar (1xxx): positiva saldon (debetsaldo)
+        - Skulder/EK (2xxx): negativa saldon (kreditsaldo)
+        - Summa av alla balansposter = 0
+
+        För visning:
+        - Tillgångar visas som positiva belopp
+        - Skulder/EK visas som positiva belopp (abs av negativa)
+        - Summa Tillgångar = Summa Skulder + EK
+        """
         # Råbalans
         trial_balance = self.accounting_service.get_trial_balance(
             company_id, fiscal_year.end_date
@@ -195,68 +207,81 @@ class ReportGenerator:
             'total_short_term': Decimal(0),
         }
 
+        # Spara råsumma för verifiering (ska bli 0)
+        raw_balance_sum = Decimal(0)
+
         for account_data in trial_balance:
             number = account_data['account_number']
+            # Signerat saldo: positiv = debet, negativ = kredit
             balance = Decimal(str(account_data['balance']))
 
-            # Tillgångar (1xxx)
+            # Skapa kopia för visning med absolut värde
+            display_data = account_data.copy()
+            display_data['balance'] = abs(balance)
+
+            # Tillgångar (1xxx) - normalt positiva (debetsaldo)
             if number.startswith('1'):
-                balance_sheet['assets'].append(account_data)
-                balance_sheet['total_assets'] += balance
+                raw_balance_sum += balance
+                balance_sheet['assets'].append(display_data)
+                balance_sheet['total_assets'] += abs(balance)
 
                 # Anläggningstillgångar (10xx-13xx)
                 if number.startswith(('10', '11', '12', '13')):
-                    balance_sheet['fixed_assets'].append(account_data)
-                    balance_sheet['total_fixed_assets'] += balance
+                    balance_sheet['fixed_assets'].append(display_data)
+                    balance_sheet['total_fixed_assets'] += abs(balance)
                 # Omsättningstillgångar (14xx-19xx)
                 else:
-                    balance_sheet['current_assets'].append(account_data)
-                    balance_sheet['total_current_assets'] += balance
+                    balance_sheet['current_assets'].append(display_data)
+                    balance_sheet['total_current_assets'] += abs(balance)
 
-            # Eget kapital och skulder (2xxx)
+            # Eget kapital och skulder (2xxx) - normalt negativa (kreditsaldo)
             elif number.startswith('2'):
-                balance_sheet['liabilities'].append(account_data)
-                balance_sheet['total_liabilities'] += balance
+                raw_balance_sum += balance
+                balance_sheet['liabilities'].append(display_data)
+                balance_sheet['total_liabilities'] += abs(balance)
 
                 # Eget kapital (20xx-21xx)
                 if number.startswith(('20', '21')):
-                    balance_sheet['equity'].append(account_data)
-                    balance_sheet['total_equity'] += balance
+                    balance_sheet['equity'].append(display_data)
+                    balance_sheet['total_equity'] += abs(balance)
                 # Långfristiga skulder (22xx-24xx)
                 elif number.startswith(('22', '23', '24')):
-                    balance_sheet['long_term_liabilities'].append(account_data)
-                    balance_sheet['total_long_term'] += balance
+                    balance_sheet['long_term_liabilities'].append(display_data)
+                    balance_sheet['total_long_term'] += abs(balance)
                 # Kortfristiga skulder (25xx-29xx)
                 else:
-                    balance_sheet['short_term_liabilities'].append(account_data)
-                    balance_sheet['total_short_term'] += balance
+                    balance_sheet['short_term_liabilities'].append(display_data)
+                    balance_sheet['total_short_term'] += abs(balance)
 
-            # Intäkter (3xxx)
+            # Intäkter (3xxx) - normalt negativa (kreditsaldo), visa som positiva
             elif number.startswith('3'):
-                income_statement['revenue'].append(account_data)
+                income_statement['revenue'].append(display_data)
                 income_statement['total_revenue'] += abs(balance)
 
-            # Kostnader (4xxx-8xxx)
+            # Kostnader (4xxx-8xxx) - normalt positiva (debetsaldo)
             elif number[0] in '45678':
-                income_statement['expenses'].append(account_data)
-                income_statement['total_expenses'] += balance
+                income_statement['expenses'].append(display_data)
+                income_statement['total_expenses'] += abs(balance)
 
                 # Varukostnad (4xxx)
                 if number.startswith('4'):
-                    income_statement['goods_cost'].append(account_data)
-                    income_statement['total_goods_cost'] += balance
+                    income_statement['goods_cost'].append(display_data)
+                    income_statement['total_goods_cost'] += abs(balance)
                 # Övriga kostnader (5xxx-6xxx)
                 elif number.startswith(('5', '6')):
-                    income_statement['other_costs'].append(account_data)
-                    income_statement['total_other_costs'] += balance
+                    income_statement['other_costs'].append(display_data)
+                    income_statement['total_other_costs'] += abs(balance)
                 # Personalkostnader (7xxx)
                 elif number.startswith('7'):
-                    income_statement['personnel'].append(account_data)
-                    income_statement['total_personnel'] += balance
+                    income_statement['personnel'].append(display_data)
+                    income_statement['total_personnel'] += abs(balance)
                 # Finansiella poster (8xxx)
                 elif number.startswith('8'):
-                    income_statement['financial'].append(account_data)
-                    income_statement['total_financial'] += balance
+                    income_statement['financial'].append(display_data)
+                    income_statement['total_financial'] += abs(balance)
+
+        # Spara råsumman för debugging (ska vara 0 om balansen stämmer)
+        balance_sheet['raw_balance_sum'] = raw_balance_sum
 
         # Resultat
         result = income_statement['total_revenue'] - income_statement['total_expenses']

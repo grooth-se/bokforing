@@ -427,8 +427,8 @@ class SIEImporter:
         - Positiv = debetsaldo (naturligt för tillgångar 1xxx, kostnader 4-8xxx)
         - Negativ = kreditsaldo (naturligt för skulder/EK 2xxx, intäkter 3xxx)
 
-        Vi lagrar alltid det absoluta värdet. Systemet använder kontotyp
-        för att avgöra om det är debet eller kredit vid beräkning.
+        Vi lagrar värdet direkt från SIE-filen. Teckenhantering sker vid visning
+        i rapporter för att säkerställa att balansräkningen stämmer.
         """
         for account_number, balance in balances.items():
             account = self.db.query(Account).filter(
@@ -441,31 +441,10 @@ class SIEImporter:
                 account = self._create_missing_account(company_id, account_number)
 
             if account:
-                # För balanskonton (1xxx, 2xxx) behöver vi hantera tecknet korrekt
-                # Tillgångar (1xxx): positivt värde i SIE = debetsaldo (behåll som det är)
-                # Skulder/EK (2xxx): negativt värde i SIE = kreditsaldo (gör positivt)
-                # Intäkter (3xxx): negativt = kreditsaldo (gör positivt)
-                # Kostnader (4-8xxx): positivt = debetsaldo (behåll som det är)
-                #
-                # UNDANTAG: Resultatkonton (2068, 2069, 2091, 2098, 2099) kan vara
-                # negativa (förlust) och ska behålla sitt tecken!
-                first_digit = account_number[0] if account_number else '0'
-
-                # Resultatkonton (209x, 206x) kräver teckenväxling
-                # I SIE: negativt = vinst (kredit), positivt = förlust (debet)
-                # I vårt system: positivt = kreditsaldo, negativt = debetsaldo
-                result_accounts = ['2068', '2069', '2091', '2098', '2099']
-
-                if account_number in result_accounts:
-                    # Vänd tecknet: SIE -100000 (vinst) → +100000, SIE +50000 (förlust) → -50000
-                    account.opening_balance = -balance
-                elif first_digit in ['2', '3']:
-                    # Övriga skulder, EK och intäkter: SIE har ofta negativa värden
-                    # Vi lagrar absolut värde (positivt)
-                    account.opening_balance = abs(balance)
-                else:
-                    # Tillgångar och kostnader: behåll som det är
-                    account.opening_balance = balance
+                # Lagra SIE-värdet direkt utan manipulation
+                # Tillgångar: positiva värden (debetsaldo)
+                # Skulder/EK: negativa värden (kreditsaldo)
+                account.opening_balance = balance
 
         self.db.commit()
 
