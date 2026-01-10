@@ -43,6 +43,7 @@ class Company(Base):
     accounts = relationship("Account", back_populates="company", cascade="all, delete-orphan")
     fiscal_years = relationship("FiscalYear", back_populates="company", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="company", cascade="all, delete-orphan")
+    assets = relationship("Asset", back_populates="company", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Company(id={self.id}, name='{self.name}', org={self.org_number})>"

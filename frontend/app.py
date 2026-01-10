@@ -62,7 +62,7 @@ def main():
     # Navigation
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Skanna dokument", "Transaktioner", "Kontoplan", "Rapporter", "SIE-import", "Inställningar"]
+        ["Dashboard", "Skanna dokument", "Transaktioner", "Kontoplan", "Tillgångar", "Rapporter", "Bokslut", "SIE-import", "Inställningar"]
     )
 
     st.sidebar.divider()
@@ -99,8 +99,12 @@ def main():
         show_transactions(service)
     elif page == "Kontoplan":
         show_accounts(service)
+    elif page == "Tillgångar":
+        show_assets(service, db)
     elif page == "Rapporter":
         show_reports(service)
+    elif page == "Bokslut":
+        show_closing(service, db)
     elif page == "SIE-import":
         show_sie_import(db)
     elif page == "Inställningar":
@@ -342,19 +346,188 @@ def show_reports(service: AccountingService):
 
     report_type = st.selectbox(
         "Välj rapport",
-        ["Verifikationslista", "Råbalans", "Balansräkning", "Resultaträkning", "Huvudbok"]
+        ["Verifikationslista", "Huvudbok", "Råbalans", "Balansräkning", "Resultaträkning",
+         "Momsrapport", "Arbetsgivardeklaration", "Skattedeklaration (INK2)"]
     )
 
     if report_type == "Verifikationslista":
         show_verification_list(service, company_id)
+    elif report_type == "Huvudbok":
+        show_general_ledger(service, company_id)
     elif report_type == "Råbalans":
         show_trial_balance(service, company_id)
     elif report_type == "Balansräkning":
         show_balance_sheet(service, company_id)
     elif report_type == "Resultaträkning":
         show_income_statement(service, company_id)
+    elif report_type == "Momsrapport":
+        show_vat_report(service, company_id)
+    elif report_type == "Arbetsgivardeklaration":
+        show_employer_report(service, company_id)
+    elif report_type == "Skattedeklaration (INK2)":
+        show_tax_declaration(service, company_id)
+
+
+def show_general_ledger(service: AccountingService, company_id: int):
+    """Visa huvudbok - alla transaktioner per konto"""
+    st.subheader("Huvudbok")
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    # Välj räkenskapsår
+    fiscal_year_options = {
+        f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years
+    }
+    selected_fy_name = st.selectbox(
+        "Räkenskapsår",
+        options=list(fiscal_year_options.keys()),
+        index=0,
+        key="gl_fy"
+    )
+    fiscal_year = fiscal_year_options[selected_fy_name]
+
+    # Hämta konton
+    accounts = service.get_accounts(company_id)
+    if not accounts:
+        st.info("Inga konton finns")
+        return
+
+    # Filter för kontogrupp
+    account_groups = {
+        "Alla konton": None,
+        "1xxx - Tillgångar": "1",
+        "2xxx - Eget kapital och skulder": "2",
+        "3xxx - Intäkter": "3",
+        "4xxx - Kostnader varor": "4",
+        "5xxx - Övriga externa kostnader": "5",
+        "6xxx - Övriga externa kostnader": "6",
+        "7xxx - Personal": "7",
+        "8xxx - Finansiella poster": "8"
+    }
+
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_group = st.selectbox(
+            "Kontogrupp",
+            options=list(account_groups.keys()),
+            key="gl_group"
+        )
+    with col2:
+        # Specifikt konto
+        account_list = ["Alla"] + [f"{a.number} - {a.name}" for a in accounts]
+        selected_account = st.selectbox(
+            "Specifikt konto",
+            options=account_list,
+            key="gl_account"
+        )
+
+    # Datumfilter
+    col3, col4 = st.columns(2)
+    with col3:
+        start_date = st.date_input(
+            "Från datum",
+            value=fiscal_year.start_date,
+            key="gl_start"
+        )
+    with col4:
+        end_date = st.date_input(
+            "Till datum",
+            value=fiscal_year.end_date,
+            key="gl_end"
+        )
+
+    st.divider()
+
+    # Filtrera konton
+    group_prefix = account_groups[selected_group]
+    if selected_account != "Alla":
+        # Specifikt konto valt
+        acc_number = selected_account.split(" - ")[0]
+        filtered_accounts = [a for a in accounts if a.number == acc_number]
+    elif group_prefix:
+        filtered_accounts = [a for a in accounts if a.number.startswith(group_prefix)]
     else:
-        st.info("Huvudbok kommer snart...")
+        filtered_accounts = accounts
+
+    # Hämta alla transaktioner för perioden
+    transactions = service.get_transactions(
+        company_id,
+        fiscal_year.id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    # Bygg en lookup för transaktionsrader per konto
+    from collections import defaultdict
+    from decimal import Decimal
+
+    account_transactions = defaultdict(list)
+    for tx in transactions:
+        for line in tx.lines:
+            account_transactions[line.account_id].append({
+                'date': tx.transaction_date,
+                'ver': tx.verification_number,
+                'description': tx.description,
+                'debit': line.debit,
+                'credit': line.credit
+            })
+
+    # Visa huvudbok per konto
+    accounts_with_activity = 0
+
+    for account in sorted(filtered_accounts, key=lambda a: a.number):
+        tx_lines = account_transactions.get(account.id, [])
+        opening_balance = account.opening_balance or Decimal(0)
+
+        # Visa endast konton med aktivitet eller ingående balans
+        if not tx_lines and opening_balance == 0:
+            continue
+
+        accounts_with_activity += 1
+
+        with st.expander(f"**{account.number}** {account.name}", expanded=False):
+            # Ingående balans
+            st.write(f"**Ingående balans:** {opening_balance:,.2f} kr")
+
+            if tx_lines:
+                # Sortera efter datum och ver.nr
+                tx_lines_sorted = sorted(tx_lines, key=lambda x: (x['date'], x['ver']))
+
+                # Visa tabell
+                st.write("| Datum | Ver | Beskrivning | Debet | Kredit | Saldo |")
+                st.write("|-------|-----|-------------|------:|-------:|------:|")
+
+                running_balance = opening_balance
+                total_debit = Decimal(0)
+                total_credit = Decimal(0)
+
+                for line in tx_lines_sorted:
+                    # Beräkna löpande saldo beroende på kontotyp
+                    if account.account_type.value in ['Tillgång', 'Kostnad']:
+                        running_balance += line['debit'] - line['credit']
+                    else:
+                        running_balance += line['credit'] - line['debit']
+
+                    total_debit += line['debit']
+                    total_credit += line['credit']
+
+                    debit_str = f"{line['debit']:,.2f}" if line['debit'] > 0 else ""
+                    credit_str = f"{line['credit']:,.2f}" if line['credit'] > 0 else ""
+                    desc_short = line['description'][:30] + "..." if len(line['description']) > 30 else line['description']
+
+                    st.write(f"| {line['date']} | {line['ver']} | {desc_short} | {debit_str} | {credit_str} | {running_balance:,.2f} |")
+
+                st.write(f"| **Summa** | | | **{total_debit:,.2f}** | **{total_credit:,.2f}** | |")
+                st.write(f"**Utgående balans:** {running_balance:,.2f} kr")
+            else:
+                st.write("Inga transaktioner under perioden")
+
+    if accounts_with_activity == 0:
+        st.info("Inga konton med aktivitet för vald period och filter")
 
 
 def show_verification_list(service: AccountingService, company_id: int):
@@ -593,6 +766,650 @@ def show_income_statement(service: AccountingService, company_id: int):
     st.write(f"### ÅRETS RESULTAT: {result:,.2f} kr")
 
 
+def show_vat_report(service: AccountingService, company_id: int):
+    """Visa momsrapport enligt Skatteverkets format"""
+    st.subheader("Momsrapport (SKV 4700)")
+
+    from app.services.tax import VATReport
+    from app.models import get_db
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    fiscal_year = fiscal_years[0]
+
+    st.write("Välj rapportperiod:")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        period_start = st.date_input(
+            "Från",
+            value=fiscal_year.start_date,
+            key="vat_start"
+        )
+    with col2:
+        period_end = st.date_input(
+            "Till",
+            value=fiscal_year.end_date,
+            key="vat_end"
+        )
+
+    # Snabbval för perioder
+    st.write("**Snabbval:**")
+    period_cols = st.columns(4)
+    from datetime import date as date_type
+    from dateutil.relativedelta import relativedelta
+
+    with period_cols[0]:
+        if st.button("Januari"):
+            year = fiscal_year.start_date.year
+            period_start = date_type(year, 1, 1)
+            period_end = date_type(year, 1, 31)
+    with period_cols[1]:
+        if st.button("Q1"):
+            year = fiscal_year.start_date.year
+            period_start = date_type(year, 1, 1)
+            period_end = date_type(year, 3, 31)
+    with period_cols[2]:
+        if st.button("Q2"):
+            year = fiscal_year.start_date.year
+            period_start = date_type(year, 4, 1)
+            period_end = date_type(year, 6, 30)
+    with period_cols[3]:
+        if st.button("Helår"):
+            period_start = fiscal_year.start_date
+            period_end = fiscal_year.end_date
+
+    if st.button("Generera momsrapport", type="primary"):
+        db = next(get_db())
+        try:
+            vat_report = VATReport(db)
+            report = vat_report.generate(company_id, period_start, period_end)
+
+            st.divider()
+            st.write(f"### Momsrapport {report['period_start']} - {report['period_end']}")
+
+            # Försäljning
+            st.write("#### Momspliktiga intäkter")
+            st.write(f"**Ruta 05 - Momspliktig försäljning exkl. moms:** {report['sales_excl_vat']:,.2f} kr")
+
+            st.divider()
+
+            # Utgående moms
+            st.write("#### Utgående moms")
+            st.write(f"**Ruta 10 - Utgående moms 25%:** {report['output_vat_25']:,.2f} kr")
+            st.write(f"**Ruta 11 - Utgående moms 12%:** {report['output_vat_12']:,.2f} kr")
+            st.write(f"**Ruta 12 - Utgående moms 6%:** {report['output_vat_6']:,.2f} kr")
+            st.write(f"**Summa utgående moms:** {report['total_output_vat']:,.2f} kr")
+
+            st.divider()
+
+            # Ingående moms
+            st.write("#### Ingående moms")
+            st.write(f"**Ruta 48 - Ingående moms:** {report['input_vat']:,.2f} kr")
+
+            st.divider()
+
+            # Resultat
+            st.write("#### Resultat")
+            vat_to_pay = report['vat_to_pay']
+            if vat_to_pay > 0:
+                st.error(f"**Ruta 49 - Moms att betala:** {vat_to_pay:,.2f} kr")
+            else:
+                st.success(f"**Ruta 49 - Moms att få tillbaka:** {abs(vat_to_pay):,.2f} kr")
+
+        except Exception as e:
+            st.error(f"Fel vid generering: {e}")
+        finally:
+            db.close()
+
+
+def show_employer_report(service: AccountingService, company_id: int):
+    """Visa arbetsgivardeklaration"""
+    st.subheader("Arbetsgivardeklaration (AGI)")
+
+    from app.services.tax import EmployerReport
+    from app.models import get_db
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    fiscal_year = fiscal_years[0]
+
+    st.write("Välj rapportperiod (normalt en månad):")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        period_start = st.date_input(
+            "Från",
+            value=fiscal_year.start_date,
+            key="agi_start"
+        )
+    with col2:
+        period_end = st.date_input(
+            "Till",
+            value=fiscal_year.end_date,
+            key="agi_end"
+        )
+
+    if st.button("Generera arbetsgivarrapport", type="primary"):
+        db = next(get_db())
+        try:
+            employer_report = EmployerReport(db)
+            report = employer_report.generate(company_id, period_start, period_end)
+
+            st.divider()
+            st.write(f"### Arbetsgivardeklaration {report['period_start']} - {report['period_end']}")
+
+            # Löneuppgifter
+            st.write("#### Löneuppgifter")
+            st.write(f"**Bruttolön:** {report['gross_salary']:,.2f} kr")
+            st.write(f"**Semesterersättning:** {report['vacation_pay']:,.2f} kr")
+            st.write(f"**Totalt löneunderlag:** {report['total_salary_base']:,.2f} kr")
+
+            st.divider()
+
+            # Arbetsgivaravgifter
+            st.write("#### Arbetsgivaravgifter")
+            rate_pct = float(report['contribution_rate']) * 100
+            st.write(f"**Avgiftssats:** {rate_pct:.2f}%")
+            st.write(f"**Beräknade arbetsgivaravgifter:** {report['calculated_contributions']:,.2f} kr")
+            st.write(f"**Bokförda arbetsgivaravgifter (skuld):** {report['employer_contributions']:,.2f} kr")
+
+            st.divider()
+
+            # Skatt
+            st.write("#### Avdragen skatt")
+            st.write(f"**Personalens källskatt (skuld):** {report['withholding_tax']:,.2f} kr")
+
+            st.divider()
+
+            # Summa att betala
+            st.write("#### Att betala till Skatteverket")
+            st.error(f"**Totalt:** {report['total_to_pay']:,.2f} kr")
+
+            st.info("""
+            **Obs!** Arbetsgivardeklarationen ska lämnas senast den 12:e i månaden
+            efter löneutbetalningen. Beloppet ska vara inbetalat samma dag.
+            """)
+
+        except Exception as e:
+            st.error(f"Fel vid generering: {e}")
+        finally:
+            db.close()
+
+
+def show_tax_declaration(service: AccountingService, company_id: int):
+    """Visa skattedeklarationsunderlag (INK2)"""
+    st.subheader("Skattedeklaration INK2 (Aktiebolag)")
+
+    from app.services.tax_declaration import TaxDeclarationService
+    from app.models import get_db
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    # Välj räkenskapsår
+    fiscal_year_options = {
+        f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years
+    }
+    selected_fy_name = st.selectbox(
+        "Räkenskapsår",
+        options=list(fiscal_year_options.keys()),
+        index=0,
+        key="tax_decl_fy"
+    )
+    fiscal_year = fiscal_year_options[selected_fy_name]
+
+    db = next(get_db())
+    try:
+        tax_service = TaxDeclarationService(db)
+
+        # Kolla om det finns sparat underlag
+        existing = tax_service.get_declaration(company_id, fiscal_year.id, "INK2")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            if existing:
+                st.success(f"Underlag sparad: {existing.updated_at.strftime('%Y-%m-%d %H:%M')}")
+                if existing.status == "submitted":
+                    st.info(f"Inskickad: {existing.submitted_at.strftime('%Y-%m-%d')}")
+
+        with col2:
+            generate = st.button("Generera underlag", type="primary")
+
+        if generate:
+            with st.spinner("Genererar skatteunderlag..."):
+                data = tax_service.generate_ink2(company_id, fiscal_year.id)
+
+                # Resultaträkning
+                st.divider()
+                st.write("### Resultaträkning")
+                income = data['income_statement']
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Intäkter och kostnader**")
+                    st.write(f"R1. Nettoomsättning: {income['R1_revenue']:,.0f} kr")
+                    st.write(f"R2. Varuinköp: {income['R2_goods_cost']:,.0f} kr")
+                    st.write(f"R3. Bruttovinst: {income['R3_gross_profit']:,.0f} kr")
+                    st.write(f"R4. Övriga externa kostnader: {income['R4_other_external']:,.0f} kr")
+                    st.write(f"R5. Personalkostnader: {income['R5_personnel']:,.0f} kr")
+                    st.write(f"R6. Avskrivningar: {income['R6_depreciation']:,.0f} kr")
+
+                with col2:
+                    st.write("**Finansiella poster**")
+                    st.write(f"R8. Rörelseresultat: {income['R8_operating_result']:,.0f} kr")
+                    st.write(f"R9. Finansiella intäkter: {income['R9_financial_income']:,.0f} kr")
+                    st.write(f"R10. Finansiella kostnader: {income['R10_financial_expense']:,.0f} kr")
+                    st.metric("R11. Resultat före skatt", f"{income['R11_result_before_tax']:,.0f} kr")
+
+                # Balansräkning
+                st.divider()
+                st.write("### Balansräkning")
+                balance = data['balance_sheet']
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Tillgångar**")
+                    st.write(f"B1. Immateriella tillgångar: {balance['assets']['B1_intangible']:,.0f} kr")
+                    st.write(f"B2. Materiella tillgångar: {balance['assets']['B2_tangible']:,.0f} kr")
+                    st.write(f"B3. Finansiella tillgångar: {balance['assets']['B3_financial']:,.0f} kr")
+                    st.write(f"B4. Anläggningstillgångar: {balance['assets']['B4_fixed_assets']:,.0f} kr")
+                    st.write(f"B5. Varulager: {balance['assets']['B5_inventory']:,.0f} kr")
+                    st.write(f"B6. Fordringar: {balance['assets']['B6_receivables']:,.0f} kr")
+                    st.write(f"B7. Kassa och bank: {balance['assets']['B7_cash']:,.0f} kr")
+                    st.metric("B9. Summa tillgångar", f"{balance['assets']['B9_total_assets']:,.0f} kr")
+
+                with col2:
+                    st.write("**Eget kapital och skulder**")
+                    st.write(f"B10. Eget kapital: {balance['liabilities']['B10_equity']:,.0f} kr")
+                    st.write(f"B11. Avsättningar: {balance['liabilities']['B11_provisions']:,.0f} kr")
+                    st.write(f"B12. Långfristiga skulder: {balance['liabilities']['B12_long_term_debt']:,.0f} kr")
+                    st.write(f"B13. Kortfristiga skulder: {balance['liabilities']['B13_short_term_debt']:,.0f} kr")
+                    st.metric("B14. Summa skulder", f"{balance['liabilities']['B14_total_liabilities']:,.0f} kr")
+
+                # Skatteberäkning
+                st.divider()
+                st.write("### Skatteberäkning")
+                tax = data['tax_calculation']
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Skattemässigt resultat", f"{tax['taxable_income']:,.0f} kr")
+                with col2:
+                    st.metric("Skattesats", f"{tax['tax_rate']*100:.1f}%")
+                with col3:
+                    st.metric("Beräknad bolagsskatt", f"{tax['calculated_tax']:,.0f} kr")
+
+                # Spara underlag
+                st.divider()
+                notes = st.text_area("Anteckningar", value=existing.notes if existing else "")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Spara underlag", type="primary"):
+                        saved = tax_service.save_declaration(
+                            company_id=company_id,
+                            fiscal_year_id=fiscal_year.id,
+                            declaration_type="INK2",
+                            data=data,
+                            notes=notes
+                        )
+                        st.success("Underlag sparat!")
+                        st.rerun()
+
+                with col2:
+                    if existing and existing.status != "submitted":
+                        if st.button("Markera som inskickad"):
+                            tax_service.mark_as_submitted(existing.id)
+                            st.success("Markerad som inskickad!")
+                            st.rerun()
+
+                # Föregående år
+                previous = tax_service.get_previous_year_data(company_id, fiscal_year.id)
+                if previous:
+                    st.divider()
+                    with st.expander("Föregående års data"):
+                        st.json(previous)
+
+    except Exception as e:
+        st.error(f"Fel: {e}")
+    finally:
+        db.close()
+
+
+def show_assets(service: AccountingService, db):
+    """Visa och hantera anläggningstillgångar"""
+    st.title("Anläggningstillgångar")
+
+    company_id = st.session_state.selected_company_id
+    if not company_id:
+        st.info("Välj ett företag först.")
+        return
+
+    from app.services.depreciation import DepreciationService
+    from app.models import AssetType, DepreciationMethod
+    from decimal import Decimal
+
+    dep_service = DepreciationService(db)
+
+    tab1, tab2, tab3 = st.tabs(["Tillgångslista", "Lägg till tillgång", "Kör avskrivningar"])
+
+    with tab1:
+        st.subheader("Registrerade tillgångar")
+
+        assets = dep_service.get_assets(company_id, active_only=False)
+
+        if not assets:
+            st.info("Inga tillgångar registrerade ännu")
+        else:
+            for asset in assets:
+                status = "Aktiv" if asset.is_active else "Avyttrad"
+                with st.expander(f"**{asset.name}** ({asset.asset_type.value}) - {status}"):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.write(f"**Anskaffningsdatum:** {asset.acquisition_date}")
+                        st.write(f"**Anskaffningsvärde:** {asset.acquisition_cost:,.2f} kr")
+                        st.write(f"**Restvärde:** {asset.residual_value or 0:,.2f} kr")
+                        st.write(f"**Nyttjandeperiod:** {asset.useful_life_months} månader")
+
+                    with col2:
+                        from datetime import date as date_type
+                        book_value = asset.get_book_value(date_type.today())
+                        accumulated = asset.get_accumulated_depreciation(date_type.today())
+
+                        st.write(f"**Avskrivningsmetod:** {asset.depreciation_method.value}")
+                        st.write(f"**Ack. avskrivningar:** {accumulated:,.2f} kr")
+                        st.write(f"**Bokfört värde:** {book_value:,.2f} kr")
+                        st.write(f"**Årlig avskrivning:** {asset.annual_depreciation:,.2f} kr")
+
+                    # Avskrivningsschema
+                    with st.expander("Visa avskrivningsschema"):
+                        schedule = dep_service.get_depreciation_schedule(asset, periods=12)
+                        st.write("| Period | Datum | Avskrivning | Ack. | Bokfört värde |")
+                        st.write("|--------|-------|------------:|-----:|--------------:|")
+                        for row in schedule:
+                            st.write(f"| {row['period']} | {row['period_date']} | {row['depreciation']:,.2f} | {row['accumulated']:,.2f} | {row['book_value']:,.2f} |")
+
+    with tab2:
+        st.subheader("Registrera ny tillgång")
+
+        accounts = service.get_accounts(company_id)
+        account_list = [f"{a.number} - {a.name}" for a in accounts]
+        account_map = {f"{a.number} - {a.name}": a.number for a in accounts}
+
+        with st.form("new_asset_form"):
+            name = st.text_input("Namn på tillgång")
+            description = st.text_area("Beskrivning", height=80)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                asset_type = st.selectbox(
+                    "Typ av tillgång",
+                    options=[t.value for t in AssetType],
+                    index=0
+                )
+                from datetime import date as date_type
+                acq_date = st.date_input("Anskaffningsdatum", value=date_type.today())
+                acq_cost = st.number_input("Anskaffningsvärde (kr)", min_value=0.0, step=1000.0)
+
+            with col2:
+                residual = st.number_input("Restvärde (kr)", min_value=0.0, step=100.0, value=0.0)
+                useful_life = st.number_input("Nyttjandeperiod (månader)", min_value=1, max_value=600, value=60)
+                dep_method = st.selectbox(
+                    "Avskrivningsmetod",
+                    options=[m.value for m in DepreciationMethod],
+                    index=0
+                )
+
+            st.write("**Koppling till konton:**")
+            col3, col4, col5 = st.columns(3)
+
+            with col3:
+                asset_account = st.selectbox(
+                    "Tillgångskonto",
+                    options=["Automatiskt"] + account_list,
+                    help="Ex: 1220 Inventarier"
+                )
+            with col4:
+                dep_account = st.selectbox(
+                    "Avskrivningskonto",
+                    options=["Automatiskt"] + account_list,
+                    help="Ex: 7832 Avskrivning inventarier"
+                )
+            with col5:
+                acc_account = st.selectbox(
+                    "Ack. avskrivningar",
+                    options=["Automatiskt"] + account_list,
+                    help="Ex: 1229 Ack avskr inventarier"
+                )
+
+            if st.form_submit_button("Registrera tillgång", type="primary"):
+                if not name or acq_cost <= 0:
+                    st.error("Fyll i namn och anskaffningsvärde")
+                else:
+                    try:
+                        type_map = {t.value: t for t in AssetType}
+                        method_map = {m.value: m for m in DepreciationMethod}
+
+                        asset = dep_service.create_asset(
+                            company_id=company_id,
+                            name=name,
+                            description=description,
+                            asset_type=type_map[asset_type],
+                            acquisition_date=acq_date,
+                            acquisition_cost=Decimal(str(acq_cost)),
+                            residual_value=Decimal(str(residual)),
+                            useful_life_months=useful_life,
+                            depreciation_method=method_map[dep_method],
+                            asset_account_number=account_map.get(asset_account) if asset_account != "Automatiskt" else None,
+                            depreciation_account_number=account_map.get(dep_account) if dep_account != "Automatiskt" else None,
+                            accumulated_account_number=account_map.get(acc_account) if acc_account != "Automatiskt" else None,
+                        )
+                        st.success(f"Tillgång '{name}' registrerad!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Fel: {e}")
+
+    with tab3:
+        st.subheader("Kör periodavskrivningar")
+
+        fiscal_years = service.get_fiscal_years(company_id)
+        if not fiscal_years:
+            st.warning("Inga räkenskapsår finns")
+            return
+
+        fiscal_year = fiscal_years[0]
+
+        st.write(f"**Räkenskapsår:** {fiscal_year.start_date} - {fiscal_year.end_date}")
+
+        from datetime import date as date_type
+        period_date = st.date_input(
+            "Avskrivningsdatum",
+            value=date_type.today(),
+            key="dep_date"
+        )
+
+        period_type = st.selectbox(
+            "Periodicitet",
+            options=["monthly", "quarterly", "annual"],
+            format_func=lambda x: {"monthly": "Månadsvis", "quarterly": "Kvartalsvis", "annual": "Årsvis"}[x]
+        )
+
+        if st.button("Kör avskrivningar", type="primary"):
+            try:
+                transactions = dep_service.run_period_depreciation(
+                    company_id=company_id,
+                    fiscal_year_id=fiscal_year.id,
+                    period_date=period_date,
+                    period_type=period_type
+                )
+
+                if transactions:
+                    st.success(f"{len(transactions)} avskrivningstransaktioner skapade!")
+                    for tx in transactions:
+                        st.write(f"- Ver {tx.verification_number}: {tx.description}")
+                else:
+                    st.info("Inga avskrivningar att göra (redan körda eller inga aktiva tillgångar)")
+
+            except Exception as e:
+                st.error(f"Fel vid avskrivning: {e}")
+
+
+def show_closing(service: AccountingService, db):
+    """Visa bokslutsrutiner"""
+    st.title("Bokslut")
+
+    company_id = st.session_state.selected_company_id
+    if not company_id:
+        st.info("Välj ett företag först.")
+        return
+
+    from app.services.closing import ClosingService
+
+    closing_service = ClosingService(db)
+
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    # Välj räkenskapsår
+    fiscal_year_options = {
+        f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years
+    }
+    selected_fy_name = st.selectbox(
+        "Räkenskapsår",
+        options=list(fiscal_year_options.keys()),
+        index=0
+    )
+    fiscal_year = fiscal_year_options[selected_fy_name]
+
+    if fiscal_year.is_closed:
+        st.success("Detta räkenskapsår är stängt")
+    else:
+        st.info("Räkenskapsåret är öppet")
+
+    tab1, tab2, tab3 = st.tabs(["Månadsbokslut", "Kvartalsbokslut", "Årsbokslut"])
+
+    with tab1:
+        st.subheader("Månadsbokslut")
+
+        from datetime import date as date_type
+        month_end = st.date_input(
+            "Periodens slutdatum",
+            value=fiscal_year.end_date,
+            key="month_end"
+        )
+
+        if st.button("Utför månadsbokslut", key="monthly_close"):
+            result = closing_service.close_month(company_id, month_end)
+
+            st.write(f"**Periodens resultat:** {result['result']:,.2f} kr")
+
+            # Visa checklista
+            st.write("**Checklista:**")
+            for item in result['checklist']:
+                status_icon = "✓" if item['status'] == 'passed' else "○" if item['status'] == 'pending' else "✗"
+                st.write(f"{status_icon} {item['task']}: {item['description']}")
+
+            # Visa validering
+            if result['validation']['errors']:
+                st.error("Fel:")
+                for error in result['validation']['errors']:
+                    st.write(f"- {error}")
+            if result['validation']['warnings']:
+                st.warning("Varningar:")
+                for warning in result['validation']['warnings']:
+                    st.write(f"- {warning}")
+
+    with tab2:
+        st.subheader("Kvartalsbokslut")
+
+        from datetime import date as date_type
+        quarter_end = st.date_input(
+            "Kvartalets slutdatum",
+            value=fiscal_year.end_date,
+            key="quarter_end"
+        )
+
+        if st.button("Utför kvartalsbokslut", key="quarterly_close"):
+            result = closing_service.close_quarter(company_id, quarter_end)
+
+            st.write(f"**Kvartalets resultat:** {result['result']:,.2f} kr")
+
+            st.write("**Checklista:**")
+            for item in result['checklist']:
+                status_icon = "✓" if item['status'] == 'passed' else "○" if item['status'] == 'pending' else "✗"
+                st.write(f"{status_icon} {item['task']}: {item['description']}")
+
+            if result['validation']['errors']:
+                st.error("Fel:")
+                for error in result['validation']['errors']:
+                    st.write(f"- {error}")
+
+    with tab3:
+        st.subheader("Årsbokslut")
+
+        st.write(f"**Räkenskapsår:** {fiscal_year.start_date} - {fiscal_year.end_date}")
+
+        # Beräkna årsresultat
+        result_amount = closing_service.calculate_period_result(
+            company_id,
+            fiscal_year.start_date,
+            fiscal_year.end_date
+        )
+        st.metric("Årets resultat", f"{result_amount:,.2f} kr")
+
+        create_disposition = st.checkbox(
+            "Skapa resultatdisposition (2099 -> 2098)",
+            value=True,
+            help="Överför årets resultat till balanserat resultat"
+        )
+
+        st.warning("""
+        **OBS!** Årsbokslut stänger räkenskapsåret permanent.
+        Se till att alla periodiseringar och avskrivningar är gjorda innan.
+        """)
+
+        if fiscal_year.is_closed:
+            st.info("Räkenskapsåret är redan stängt")
+        else:
+            if st.button("Utför årsbokslut", type="primary", key="annual_close"):
+                try:
+                    result = closing_service.close_year(
+                        company_id,
+                        fiscal_year.id,
+                        create_result_disposition=create_disposition
+                    )
+
+                    if result['status'] == 'closed':
+                        st.success("Årsbokslut genomfört!")
+                        st.write(f"**Årets resultat:** {result['result']:,.2f} kr")
+                        if result['disposition_transaction']:
+                            st.write(f"**Resultatdisposition:** Ver {result['disposition_transaction']}")
+                        st.rerun()
+                    else:
+                        st.error("Årsbokslut kunde inte genomföras")
+                        for error in result['validation']['errors']:
+                            st.write(f"- {error}")
+
+                except Exception as e:
+                    st.error(f"Fel vid årsbokslut: {e}")
+
+
 def show_settings(service: AccountingService):
     """Visa inställningar"""
     st.title("Inställningar")
@@ -656,7 +1473,8 @@ def show_document_scanner(service: AccountingService, db):
     st.write("""
     Ladda upp kvitton, fakturor eller andra dokument.
     Systemet extraherar automatiskt datum, belopp och leverantör
-    och föreslår en bokföringstransaktion.
+    och föreslår en bokföringstransaktion. Om OCR misslyckas kan du
+    registrera transaktionen manuellt.
     """)
 
     # Filuppladdning
@@ -667,169 +1485,284 @@ def show_document_scanner(service: AccountingService, db):
     )
 
     if uploaded_file:
-        col1, col2 = st.columns([1, 1])
+        # Visa dokumentförhandsgranskning
+        st.subheader("Dokument")
+        col_preview, col_data = st.columns([1, 1])
 
-        with col1:
-            st.subheader("Dokument")
-            # Visa förhandsgranskning för bilder
+        with col_preview:
             if uploaded_file.type.startswith('image/'):
                 st.image(uploaded_file, use_container_width=True)
             else:
                 st.info(f"PDF: {uploaded_file.name}")
 
-        with col2:
-            st.subheader("Extraherad data")
+        # Läs filinnehåll
+        file_content = uploaded_file.read()
+        uploaded_file.seek(0)
 
-            # Bearbeta dokument
-            try:
-                processor = DocumentProcessor()
-                file_content = uploaded_file.read()
-                uploaded_file.seek(0)  # Reset för eventuell senare användning
+        # Bearbeta dokument med OCR
+        processor = DocumentProcessor()
+        try:
+            with st.spinner("Analyserar dokument..."):
+                extracted = processor.process_file(file_content, uploaded_file.name)
+            ocr_success = extracted.raw_text and len(extracted.raw_text) > 10
+        except Exception:
+            extracted = None
+            ocr_success = False
 
-                with st.spinner("Analyserar dokument..."):
-                    extracted = processor.process_file(file_content, uploaded_file.name)
+        with col_data:
+            if ocr_success:
+                confidence_pct = int(extracted.confidence * 100)
+                st.progress(extracted.confidence, text=f"OCR Konfidens: {confidence_pct}%")
+                if extracted.confidence < 0.5:
+                    st.warning("Låg konfidens - överväg manuell registrering")
+            else:
+                st.warning("OCR kunde inte läsa dokumentet")
 
-                # Visa extraherad data
-                if extracted.raw_text:
-                    confidence_pct = int(extracted.confidence * 100)
-                    st.progress(extracted.confidence, text=f"Konfidens: {confidence_pct}%")
+        st.divider()
 
-                    # Formulär för att justera och spara
-                    with st.form("transaction_form"):
-                        st.write("**Justera och spara transaktion**")
+        # Flikar för OCR-resultat och manuell registrering
+        tab1, tab2 = st.tabs(["OCR-resultat", "Manuell registrering"])
 
-                        # Datum
-                        from datetime import date as date_type
-                        tx_date = st.date_input(
-                            "Datum",
-                            value=extracted.date or date_type.today()
-                        )
+        # Hämta konton för båda flikarna
+        accounts = service.get_accounts(company_id)
+        account_options = {f"{a.number} - {a.name}": a.id for a in accounts}
+        account_list = list(account_options.keys())
 
-                        # Leverantör/beskrivning
-                        description = st.text_input(
-                            "Beskrivning",
-                            value=extracted.description or ""
-                        )
+        with tab1:
+            if ocr_success:
+                with st.form("ocr_transaction_form"):
+                    st.write("**Justera och spara transaktion**")
 
-                        # Belopp
-                        total = st.number_input(
-                            "Totalbelopp (inkl moms)",
-                            value=float(extracted.total_amount or 0),
-                            min_value=0.0,
-                            step=10.0
-                        )
+                    from datetime import date as date_type
 
-                        # Moms
-                        vat_rate = st.selectbox(
-                            "Momssats",
-                            options=[25, 12, 6, 0],
-                            index=0 if not extracted.vat_rate else [25, 12, 6, 0].index(extracted.vat_rate)
-                        )
+                    tx_date = st.date_input(
+                        "Datum",
+                        value=extracted.date or date_type.today(),
+                        key="ocr_date"
+                    )
 
-                        # Kontoförslag
-                        suggestions = suggest_accounts(extracted)
+                    description = st.text_input(
+                        "Beskrivning",
+                        value=extracted.description or "",
+                        key="ocr_desc"
+                    )
 
-                        st.write(f"**Kategori:** {suggestions['category']}")
+                    total = st.number_input(
+                        "Totalbelopp (inkl moms)",
+                        value=float(extracted.total_amount or 0),
+                        min_value=0.0,
+                        step=10.0,
+                        key="ocr_total"
+                    )
 
-                        # Hämta konton för dropdown
-                        accounts = service.get_accounts(company_id)
-                        account_options = {f"{a.number} - {a.name}": a.id for a in accounts}
-                        account_list = list(account_options.keys())
+                    vat_rate = st.selectbox(
+                        "Momssats",
+                        options=[25, 12, 6, 0],
+                        index=0 if not extracted.vat_rate else [25, 12, 6, 0].index(extracted.vat_rate),
+                        key="ocr_vat"
+                    )
 
-                        # Hitta förvalda konton
-                        expense_default = next(
-                            (a for a in account_list if a.startswith(suggestions['expense_account'])),
-                            account_list[0] if account_list else None
-                        )
-                        payment_default = next(
-                            (a for a in account_list if a.startswith(suggestions['payment_account'])),
-                            account_list[0] if account_list else None
-                        )
+                    suggestions = suggest_accounts(extracted)
+                    st.write(f"**Kategori:** {suggestions['category']}")
 
-                        expense_account = st.selectbox(
-                            "Kostnadskonto",
-                            options=account_list,
-                            index=account_list.index(expense_default) if expense_default in account_list else 0
-                        )
+                    expense_default = next(
+                        (a for a in account_list if a.startswith(suggestions['expense_account'])),
+                        account_list[0] if account_list else None
+                    )
+                    payment_default = next(
+                        (a for a in account_list if a.startswith(suggestions['payment_account'])),
+                        account_list[0] if account_list else None
+                    )
 
-                        payment_account = st.selectbox(
-                            "Betalkonto",
-                            options=account_list,
-                            index=account_list.index(payment_default) if payment_default in account_list else 0
-                        )
+                    expense_account = st.selectbox(
+                        "Kostnadskonto",
+                        options=account_list,
+                        index=account_list.index(expense_default) if expense_default in account_list else 0,
+                        key="ocr_expense"
+                    )
 
-                        # Spara-knapp
-                        if st.form_submit_button("Skapa transaktion", type="primary"):
-                            if total > 0 and description:
-                                try:
-                                    from decimal import Decimal
+                    payment_account = st.selectbox(
+                        "Betalkonto",
+                        options=account_list,
+                        index=account_list.index(payment_default) if payment_default in account_list else 0,
+                        key="ocr_payment"
+                    )
 
-                                    # Beräkna belopp
-                                    total_dec = Decimal(str(total))
-                                    if vat_rate > 0:
-                                        vat_amount = total_dec * Decimal(vat_rate) / Decimal(100 + vat_rate)
-                                        net_amount = total_dec - vat_amount
-                                    else:
-                                        vat_amount = Decimal(0)
-                                        net_amount = total_dec
+                    if st.form_submit_button("Skapa transaktion", type="primary"):
+                        if total > 0 and description:
+                            try:
+                                from decimal import Decimal
 
-                                    # Bygg transaktionsrader
-                                    lines = [
-                                        {
-                                            "account_id": account_options[expense_account],
-                                            "debit": net_amount.quantize(Decimal('0.01')),
-                                            "credit": Decimal(0)
-                                        },
-                                        {
-                                            "account_id": account_options[payment_account],
-                                            "debit": Decimal(0),
-                                            "credit": total_dec.quantize(Decimal('0.01'))
-                                        }
-                                    ]
+                                total_dec = Decimal(str(total))
+                                if vat_rate > 0:
+                                    vat_amount = total_dec * Decimal(vat_rate) / Decimal(100 + vat_rate)
+                                    net_amount = total_dec - vat_amount
+                                else:
+                                    vat_amount = Decimal(0)
+                                    net_amount = total_dec
 
-                                    # Lägg till moms om tillämpligt
-                                    if vat_rate > 0:
-                                        vat_account = next(
-                                            (a for a in accounts if a.number == "1610"),
-                                            None
-                                        )
-                                        if vat_account:
-                                            lines.insert(1, {
-                                                "account_id": vat_account.id,
-                                                "debit": vat_amount.quantize(Decimal('0.01')),
-                                                "credit": Decimal(0)
-                                            })
+                                lines = [
+                                    {
+                                        "account_id": account_options[expense_account],
+                                        "debit": net_amount.quantize(Decimal('0.01')),
+                                        "credit": Decimal(0)
+                                    },
+                                    {
+                                        "account_id": account_options[payment_account],
+                                        "debit": Decimal(0),
+                                        "credit": total_dec.quantize(Decimal('0.01'))
+                                    }
+                                ]
 
-                                    # Skapa transaktion
-                                    tx = service.create_transaction(
-                                        company_id=company_id,
-                                        fiscal_year_id=fiscal_year.id,
-                                        transaction_date=tx_date,
-                                        description=description,
-                                        lines=lines
+                                if vat_rate > 0:
+                                    vat_account = next(
+                                        (a for a in accounts if a.number == "2640"),
+                                        None
                                     )
+                                    if vat_account:
+                                        lines.insert(1, {
+                                            "account_id": vat_account.id,
+                                            "debit": vat_amount.quantize(Decimal('0.01')),
+                                            "credit": Decimal(0)
+                                        })
 
-                                    # Spara verifikat
-                                    voucher_path = processor.save_voucher(file_content, uploaded_file.name)
+                                tx = service.create_transaction(
+                                    company_id=company_id,
+                                    fiscal_year_id=fiscal_year.id,
+                                    transaction_date=tx_date,
+                                    description=description,
+                                    lines=lines
+                                )
 
-                                    st.success(f"Transaktion {tx.verification_number} skapad!")
-                                    st.info(f"Verifikat sparat: {voucher_path}")
-                                    st.rerun()
+                                voucher_path = processor.save_voucher(file_content, uploaded_file.name)
+                                st.success(f"Transaktion {tx.verification_number} skapad!")
+                                st.info(f"Verifikat sparat: {voucher_path}")
+                                st.rerun()
 
-                                except Exception as e:
-                                    st.error(f"Fel vid skapande: {e}")
-                            else:
-                                st.error("Fyll i belopp och beskrivning")
+                            except Exception as e:
+                                st.error(f"Fel vid skapande: {e}")
+                        else:
+                            st.error("Fyll i belopp och beskrivning")
 
-                    # Visa råtext
-                    with st.expander("Visa extraherad text"):
-                        st.text(extracted.raw_text[:2000] if len(extracted.raw_text) > 2000 else extracted.raw_text)
+                with st.expander("Visa extraherad text"):
+                    st.text(extracted.raw_text[:2000] if len(extracted.raw_text) > 2000 else extracted.raw_text)
+            else:
+                st.info("Ingen OCR-data tillgänglig. Använd fliken 'Manuell registrering' för att bokföra dokumentet.")
 
-                else:
-                    st.warning("Kunde inte extrahera text från dokumentet. Kontrollera att det är läsbart.")
+        with tab2:
+            st.write("**Registrera transaktion manuellt**")
+            st.write("Lägg till konteringsrader. Summa debet måste vara lika med summa kredit.")
 
-            except Exception as e:
-                st.error(f"Fel vid dokumentbearbetning: {e}")
+            with st.form("manual_transaction_form"):
+                from datetime import date as date_type
+
+                manual_date = st.date_input(
+                    "Datum",
+                    value=date_type.today(),
+                    key="manual_date"
+                )
+
+                manual_description = st.text_input(
+                    "Beskrivning",
+                    key="manual_desc"
+                )
+
+                st.write("**Konteringsrader:**")
+
+                # Initiera session state för antal rader
+                if 'manual_rows' not in st.session_state:
+                    st.session_state.manual_rows = 4
+
+                manual_lines = []
+                total_debit = 0.0
+                total_credit = 0.0
+
+                for i in range(st.session_state.manual_rows):
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        acc = st.selectbox(
+                            f"Konto {i+1}",
+                            options=[""] + account_list,
+                            key=f"manual_acc_{i}"
+                        )
+                    with col2:
+                        debit = st.number_input(
+                            f"Debet {i+1}",
+                            min_value=0.0,
+                            step=100.0,
+                            key=f"manual_debit_{i}"
+                        )
+                    with col3:
+                        credit = st.number_input(
+                            f"Kredit {i+1}",
+                            min_value=0.0,
+                            step=100.0,
+                            key=f"manual_credit_{i}"
+                        )
+
+                    if acc and (debit > 0 or credit > 0):
+                        manual_lines.append({
+                            "account": acc,
+                            "debit": debit,
+                            "credit": credit
+                        })
+                        total_debit += debit
+                        total_credit += credit
+
+                # Visa summa
+                st.divider()
+                col_sum1, col_sum2, col_sum3 = st.columns([3, 1, 1])
+                with col_sum1:
+                    st.write("**Summa:**")
+                with col_sum2:
+                    st.write(f"**{total_debit:,.2f}**")
+                with col_sum3:
+                    st.write(f"**{total_credit:,.2f}**")
+
+                # Balansindikator
+                if total_debit > 0 or total_credit > 0:
+                    diff = abs(total_debit - total_credit)
+                    if diff < 0.01:
+                        st.success("Transaktionen balanserar")
+                    else:
+                        st.error(f"Differens: {diff:,.2f} kr")
+
+                if st.form_submit_button("Spara transaktion", type="primary"):
+                    if not manual_description:
+                        st.error("Ange en beskrivning")
+                    elif len(manual_lines) < 2:
+                        st.error("Minst 2 konteringsrader krävs")
+                    elif abs(total_debit - total_credit) >= 0.01:
+                        st.error("Transaktionen balanserar inte (debet != kredit)")
+                    else:
+                        try:
+                            from decimal import Decimal
+
+                            lines = []
+                            for line in manual_lines:
+                                lines.append({
+                                    "account_id": account_options[line["account"]],
+                                    "debit": Decimal(str(line["debit"])),
+                                    "credit": Decimal(str(line["credit"]))
+                                })
+
+                            tx = service.create_transaction(
+                                company_id=company_id,
+                                fiscal_year_id=fiscal_year.id,
+                                transaction_date=manual_date,
+                                description=manual_description,
+                                lines=lines
+                            )
+
+                            # Spara verifikat
+                            voucher_path = processor.save_voucher(file_content, uploaded_file.name)
+
+                            st.success(f"Transaktion {tx.verification_number} skapad!")
+                            st.info(f"Verifikat sparat: {voucher_path}")
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"Fel vid skapande: {e}")
 
     st.divider()
 
