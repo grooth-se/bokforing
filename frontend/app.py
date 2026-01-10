@@ -1173,7 +1173,7 @@ def show_reports(service: AccountingService):
         return
 
     # Hämta räkenskapsår för export
-    db = next(get_db())
+    db = get_db()
     fiscal_years = service.get_fiscal_years(company_id)
     fiscal_year = fiscal_years[0] if fiscal_years else None
 
