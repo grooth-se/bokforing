@@ -1988,12 +1988,13 @@ def show_settings(service: AccountingService):
         st.info("Välj ett företag först.")
         return
 
-    from app.models import get_db, CompanyDocument, DocumentType, AnnualReport
+    from app.models import get_db, CompanyDocument, DocumentType, AnnualReport, Company
     from datetime import date
     import base64
 
     db = next(get_db())
-    company = service.get_company(company_id)
+    # Hämta company från samma session som vi använder för att spara
+    company = db.query(Company).filter(Company.id == company_id).first()
 
     # Flikar för olika inställningar
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
