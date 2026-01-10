@@ -161,29 +161,114 @@ class ReportGenerator:
             company_id, fiscal_year.end_date
         )
 
-        # Gruppera per kontoklass
-        income_statement = {'revenue': [], 'expenses': [], 'total_revenue': Decimal(0), 'total_expenses': Decimal(0)}
-        balance_sheet = {'assets': [], 'liabilities': [], 'total_assets': Decimal(0), 'total_liabilities': Decimal(0)}
+        # Gruppera per kontoklass - resultaträkning
+        income_statement = {
+            'revenue': [],
+            'expenses': [],
+            'goods_cost': [],
+            'other_costs': [],
+            'personnel': [],
+            'financial': [],
+            'total_revenue': Decimal(0),
+            'total_expenses': Decimal(0),
+            'total_goods_cost': Decimal(0),
+            'total_other_costs': Decimal(0),
+            'total_personnel': Decimal(0),
+            'total_financial': Decimal(0),
+        }
+
+        # Gruppera per kontoklass - balansräkning (detaljerad)
+        balance_sheet = {
+            'assets': [],
+            'liabilities': [],
+            'fixed_assets': [],          # 10xx-13xx Anläggningstillgångar
+            'current_assets': [],        # 14xx-19xx Omsättningstillgångar
+            'equity': [],                # 20xx-21xx Eget kapital
+            'long_term_liabilities': [], # 22xx-24xx Långfristiga skulder
+            'short_term_liabilities': [], # 25xx-29xx Kortfristiga skulder
+            'total_assets': Decimal(0),
+            'total_liabilities': Decimal(0),
+            'total_fixed_assets': Decimal(0),
+            'total_current_assets': Decimal(0),
+            'total_equity': Decimal(0),
+            'total_long_term': Decimal(0),
+            'total_short_term': Decimal(0),
+        }
 
         for account_data in trial_balance:
             number = account_data['account_number']
             balance = Decimal(str(account_data['balance']))
 
+            # Tillgångar (1xxx)
             if number.startswith('1'):
                 balance_sheet['assets'].append(account_data)
                 balance_sheet['total_assets'] += balance
+
+                # Anläggningstillgångar (10xx-13xx)
+                if number.startswith(('10', '11', '12', '13')):
+                    balance_sheet['fixed_assets'].append(account_data)
+                    balance_sheet['total_fixed_assets'] += balance
+                # Omsättningstillgångar (14xx-19xx)
+                else:
+                    balance_sheet['current_assets'].append(account_data)
+                    balance_sheet['total_current_assets'] += balance
+
+            # Eget kapital och skulder (2xxx)
             elif number.startswith('2'):
                 balance_sheet['liabilities'].append(account_data)
                 balance_sheet['total_liabilities'] += balance
+
+                # Eget kapital (20xx-21xx)
+                if number.startswith(('20', '21')):
+                    balance_sheet['equity'].append(account_data)
+                    balance_sheet['total_equity'] += balance
+                # Långfristiga skulder (22xx-24xx)
+                elif number.startswith(('22', '23', '24')):
+                    balance_sheet['long_term_liabilities'].append(account_data)
+                    balance_sheet['total_long_term'] += balance
+                # Kortfristiga skulder (25xx-29xx)
+                else:
+                    balance_sheet['short_term_liabilities'].append(account_data)
+                    balance_sheet['total_short_term'] += balance
+
+            # Intäkter (3xxx)
             elif number.startswith('3'):
                 income_statement['revenue'].append(account_data)
                 income_statement['total_revenue'] += abs(balance)
+
+            # Kostnader (4xxx-8xxx)
             elif number[0] in '45678':
                 income_statement['expenses'].append(account_data)
                 income_statement['total_expenses'] += balance
 
+                # Varukostnad (4xxx)
+                if number.startswith('4'):
+                    income_statement['goods_cost'].append(account_data)
+                    income_statement['total_goods_cost'] += balance
+                # Övriga kostnader (5xxx-6xxx)
+                elif number.startswith(('5', '6')):
+                    income_statement['other_costs'].append(account_data)
+                    income_statement['total_other_costs'] += balance
+                # Personalkostnader (7xxx)
+                elif number.startswith('7'):
+                    income_statement['personnel'].append(account_data)
+                    income_statement['total_personnel'] += balance
+                # Finansiella poster (8xxx)
+                elif number.startswith('8'):
+                    income_statement['financial'].append(account_data)
+                    income_statement['total_financial'] += balance
+
         # Resultat
         result = income_statement['total_revenue'] - income_statement['total_expenses']
+
+        # Bruttovinst och rörelseresultat
+        income_statement['gross_profit'] = income_statement['total_revenue'] - income_statement['total_goods_cost']
+        income_statement['operating_result'] = (
+            income_statement['gross_profit'] -
+            income_statement['total_other_costs'] -
+            income_statement['total_personnel']
+        )
+        income_statement['result'] = result
 
         return {
             'trial_balance': trial_balance,
