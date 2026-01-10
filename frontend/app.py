@@ -124,9 +124,11 @@ def show_dashboard(service: AccountingService):
     # KPI-kort
     col1, col2, col3, col4 = st.columns(4)
 
-    fiscal_year = service.get_current_fiscal_year(company_id)
+    # Använd aktivt räkenskapsår (nuvarande eller senaste)
+    fiscal_year = service.get_active_fiscal_year(company_id)
 
     if fiscal_year:
+        st.caption(f"Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}")
         transactions = service.get_transactions(company_id, fiscal_year.id)
 
         # Beräkna totaler
@@ -183,10 +185,36 @@ def show_transactions(service: AccountingService):
         st.info("Välj ett företag först.")
         return
 
-    fiscal_year = service.get_current_fiscal_year(company_id)
-    if not fiscal_year:
+    # Hämta alla räkenskapsår för företaget
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
         st.warning("Skapa ett räkenskapsår först under Inställningar.")
         return
+
+    # Välj räkenskapsår (visa senaste som standard)
+    fiscal_year_options = {
+        f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years
+    }
+    selected_fy_name = st.selectbox(
+        "Räkenskapsår",
+        options=list(fiscal_year_options.keys()),
+        index=0
+    )
+    fiscal_year = fiscal_year_options[selected_fy_name]
+
+    # Visa sammanfattning
+    transaction_count = service.get_transaction_count(company_id, fiscal_year.id)
+    next_ver = service.get_next_verification_number(company_id, fiscal_year.id)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Antal transaktioner", transaction_count)
+    with col2:
+        st.metric("Nästa verifikationsnummer", next_ver)
+    with col3:
+        st.metric("Räkenskapsår", f"{fiscal_year.start_date.year}")
+
+    st.divider()
 
     tab1, tab2 = st.tabs(["Visa transaktioner", "Ny transaktion"])
 
@@ -194,6 +222,7 @@ def show_transactions(service: AccountingService):
         transactions = service.get_transactions(company_id, fiscal_year.id)
 
         if transactions:
+            st.write(f"Visar {len(transactions)} transaktioner")
             for tx in reversed(transactions):
                 with st.expander(f"Ver {tx.verification_number}: {tx.description} ({tx.transaction_date})"):
                     st.write(f"**Datum:** {tx.transaction_date}")
@@ -205,7 +234,7 @@ def show_transactions(service: AccountingService):
                         credit_str = f"{line.credit:,.2f}" if line.credit > 0 else ""
                         st.write(f"  {line.account.number} {line.account.name}: D {debit_str} / K {credit_str}")
         else:
-            st.info("Inga transaktioner ännu")
+            st.info("Inga transaktioner ännu för detta räkenskapsår")
 
     with tab2:
         st.subheader("Skapa ny transaktion")
@@ -313,10 +342,12 @@ def show_reports(service: AccountingService):
 
     report_type = st.selectbox(
         "Välj rapport",
-        ["Råbalans", "Balansräkning", "Resultaträkning", "Huvudbok"]
+        ["Verifikationslista", "Råbalans", "Balansräkning", "Resultaträkning", "Huvudbok"]
     )
 
-    if report_type == "Råbalans":
+    if report_type == "Verifikationslista":
+        show_verification_list(service, company_id)
+    elif report_type == "Råbalans":
         show_trial_balance(service, company_id)
     elif report_type == "Balansräkning":
         show_balance_sheet(service, company_id)
@@ -324,6 +355,144 @@ def show_reports(service: AccountingService):
         show_income_statement(service, company_id)
     else:
         st.info("Huvudbok kommer snart...")
+
+
+def show_verification_list(service: AccountingService, company_id: int):
+    """Visa verifikationslista med filter"""
+    st.subheader("Verifikationslista")
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+    if not fiscal_years:
+        st.warning("Inga räkenskapsår finns")
+        return
+
+    # Välj räkenskapsår
+    fiscal_year_options = {
+        f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years
+    }
+    selected_fy_name = st.selectbox(
+        "Räkenskapsår",
+        options=list(fiscal_year_options.keys()),
+        index=0,
+        key="ver_list_fy"
+    )
+    fiscal_year = fiscal_year_options[selected_fy_name]
+
+    # Filterval
+    filter_type = st.radio(
+        "Filtrera på:",
+        ["Datum", "Verifikationsnummer"],
+        horizontal=True
+    )
+
+    col1, col2 = st.columns(2)
+
+    start_date = None
+    end_date = None
+    ver_from = None
+    ver_to = None
+
+    if filter_type == "Datum":
+        with col1:
+            start_date = st.date_input(
+                "Från datum",
+                value=fiscal_year.start_date,
+                key="ver_start_date"
+            )
+        with col2:
+            end_date = st.date_input(
+                "Till datum",
+                value=fiscal_year.end_date,
+                key="ver_end_date"
+            )
+    else:
+        # Hämta min/max verifikationsnummer
+        transactions = service.get_transactions(company_id, fiscal_year.id)
+        if transactions:
+            min_ver = min(t.verification_number for t in transactions)
+            max_ver = max(t.verification_number for t in transactions)
+        else:
+            min_ver, max_ver = 1, 1
+
+        with col1:
+            ver_from = st.number_input(
+                "Från verifikation",
+                min_value=min_ver,
+                max_value=max_ver,
+                value=min_ver,
+                key="ver_from"
+            )
+        with col2:
+            ver_to = st.number_input(
+                "Till verifikation",
+                min_value=min_ver,
+                max_value=max_ver,
+                value=max_ver,
+                key="ver_to"
+            )
+
+    st.divider()
+
+    # Hämta transaktioner med filter
+    transactions = service.get_transactions(
+        company_id,
+        fiscal_year.id,
+        start_date=start_date,
+        end_date=end_date,
+        ver_from=ver_from,
+        ver_to=ver_to
+    )
+
+    if not transactions:
+        st.info("Inga verifikationer matchar filtret")
+        return
+
+    st.write(f"**{len(transactions)} verifikationer**")
+
+    # Visa verifikationslista
+    for tx in transactions:
+        st.markdown(f"### Verifikation {tx.verification_number}")
+        st.write(f"**Datum:** {tx.transaction_date} | **Beskrivning:** {tx.description}")
+
+        # Konteringsrader som tabell
+        st.write("| Konto | Kontonamn | Debet | Kredit |")
+        st.write("|-------|-----------|------:|-------:|")
+
+        total_debit = 0
+        total_credit = 0
+        for line in tx.lines:
+            debit_str = f"{line.debit:,.2f}" if line.debit > 0 else ""
+            credit_str = f"{line.credit:,.2f}" if line.credit > 0 else ""
+            st.write(f"| {line.account.number} | {line.account.name} | {debit_str} | {credit_str} |")
+            total_debit += float(line.debit)
+            total_credit += float(line.credit)
+
+        st.write(f"| **Summa** | | **{total_debit:,.2f}** | **{total_credit:,.2f}** |")
+
+        # Visa bifogat verifikat om det finns
+        if hasattr(tx, 'vouchers') and tx.vouchers:
+            st.write("**Bifogade verifikat:**")
+            for voucher in tx.vouchers:
+                if voucher.file_path:
+                    from pathlib import Path
+                    voucher_path = Path(voucher.file_path)
+                    if voucher_path.exists():
+                        if voucher_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
+                            st.image(str(voucher_path), caption=voucher_path.name, width=400)
+                        elif voucher_path.suffix.lower() == '.pdf':
+                            st.write(f"📄 PDF: {voucher_path.name}")
+                            with open(voucher_path, "rb") as f:
+                                st.download_button(
+                                    "Ladda ner PDF",
+                                    f.read(),
+                                    file_name=voucher_path.name,
+                                    mime="application/pdf"
+                                )
+                        else:
+                            st.write(f"📎 {voucher_path.name}")
+
+        st.divider()
 
 
 def show_trial_balance(service: AccountingService, company_id: int):

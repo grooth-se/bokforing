@@ -125,7 +125,7 @@ class AccountingService:
         return fiscal_year
 
     def get_current_fiscal_year(self, company_id: int) -> Optional[FiscalYear]:
-        """Hämta aktuellt räkenskapsår"""
+        """Hämta aktuellt räkenskapsår (där dagens datum ligger inom perioden)"""
         today = date.today()
         return (
             self.db.query(FiscalYear)
@@ -134,6 +134,24 @@ class AccountingService:
                 FiscalYear.start_date <= today,
                 FiscalYear.end_date >= today
             )
+            .first()
+        )
+
+    def get_active_fiscal_year(self, company_id: int) -> Optional[FiscalYear]:
+        """
+        Hämta aktivt räkenskapsår - först nuvarande, annars senaste.
+        Används för att hantera importerad historisk data.
+        """
+        # Försök hitta nuvarande räkenskapsår
+        current = self.get_current_fiscal_year(company_id)
+        if current:
+            return current
+
+        # Annars hämta senaste räkenskapsåret
+        return (
+            self.db.query(FiscalYear)
+            .filter(FiscalYear.company_id == company_id)
+            .order_by(FiscalYear.end_date.desc())
             .first()
         )
 
@@ -220,7 +238,9 @@ class AccountingService:
         company_id: int,
         fiscal_year_id: Optional[int] = None,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        ver_from: Optional[int] = None,
+        ver_to: Optional[int] = None
     ) -> list[Transaction]:
         """Hämta transaktioner med filter"""
         query = self.db.query(Transaction).filter(Transaction.company_id == company_id)
@@ -231,8 +251,23 @@ class AccountingService:
             query = query.filter(Transaction.transaction_date >= start_date)
         if end_date:
             query = query.filter(Transaction.transaction_date <= end_date)
+        if ver_from:
+            query = query.filter(Transaction.verification_number >= ver_from)
+        if ver_to:
+            query = query.filter(Transaction.verification_number <= ver_to)
 
         return query.order_by(Transaction.verification_number).all()
+
+    def get_transaction_count(self, company_id: int, fiscal_year_id: int) -> int:
+        """Hämta antal transaktioner för ett räkenskapsår"""
+        return (
+            self.db.query(func.count(Transaction.id))
+            .filter(
+                Transaction.company_id == company_id,
+                Transaction.fiscal_year_id == fiscal_year_id
+            )
+            .scalar() or 0
+        )
 
     # === SALDON ===
 
