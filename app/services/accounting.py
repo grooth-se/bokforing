@@ -418,15 +418,22 @@ class AccountingService:
         # Hämta ingående balans med korrekt teckenhantering
         ib = account.opening_balance or Decimal(0)
 
+        # Resultatkonton som kan ha negativa saldon (förlust)
+        result_accounts = ['2068', '2069', '2091', '2098', '2099']
+        is_result_account = account.number in result_accounts
+
         # Tillgångar och kostnader har normalt debetsaldo
         if account.account_type in [AccountType.ASSET, AccountType.EXPENSE]:
             # IB kan vara negativ om det är en ackumulerad avskrivning etc.
             return total_debit - total_credit + ib
         # Skulder, EK och intäkter har normalt kreditsaldo
         else:
-            # Om IB är negativ (från SIE), konvertera till positiv kreditbalans
-            # SIE lagrar skuldkonton med negativa tal
-            if ib < 0:
+            # Resultatkonton (2099 etc.) kan ha negativ IB (förlust) - behåll tecken
+            if is_result_account:
+                # För resultatkonton: negativ IB = förlust (minskar EK)
+                return total_credit - total_debit + ib
+            # Övriga EK/skulder: om IB är negativ (från SIE), konvertera till positiv
+            elif ib < 0:
                 ib = abs(ib)
             return total_credit - total_debit + ib
 

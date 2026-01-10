@@ -12,6 +12,7 @@ from app.models.base import engine, Base, SessionLocal
 from app.services.accounting import AccountingService
 from app.services.sie_import import SIEImporter
 from app.services.document_processor import DocumentProcessor, suggest_accounts
+from app.services.report_generator import ReportGenerator
 
 # Skapa databastabeller
 Base.metadata.create_all(bind=engine)
@@ -114,7 +115,12 @@ def main():
 
 
 def show_dashboard(service: AccountingService):
-    """Visa dashboard med KPI:er"""
+    """Visa dashboard med KPI:er och diagram"""
+    import plotly.graph_objects as go
+    import plotly.express as px
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
     st.title("Dashboard")
 
     company_id = st.session_state.selected_company_id
@@ -125,59 +131,335 @@ def show_dashboard(service: AccountingService):
     company = service.get_company(company_id)
     st.header(f"📈 {company.name}")
 
-    # KPI-kort
-    col1, col2, col3, col4 = st.columns(4)
-
     # Använd aktivt räkenskapsår (nuvarande eller senaste)
     fiscal_year = service.get_active_fiscal_year(company_id)
 
-    if fiscal_year:
-        st.caption(f"Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}")
-        transactions = service.get_transactions(company_id, fiscal_year.id)
-
-        # Beräkna totaler
-        total_transactions = len(transactions)
-
-        # Hämta saldon för några nyckelkonton
-        accounts = service.get_accounts(company_id)
-
-        # Bank (1930)
-        bank_account = next((a for a in accounts if a.number == "1930"), None)
-        bank_balance = service.get_account_balance(bank_account.id) if bank_account else 0
-
-        # Kundfordringar (1510)
-        customer_account = next((a for a in accounts if a.number == "1510"), None)
-        customer_balance = service.get_account_balance(customer_account.id) if customer_account else 0
-
-        # Leverantörsskulder (2410)
-        supplier_account = next((a for a in accounts if a.number == "2410"), None)
-        supplier_balance = service.get_account_balance(supplier_account.id) if supplier_account else 0
-
-        with col1:
-            st.metric("Banksaldo", f"{bank_balance:,.0f} kr")
-        with col2:
-            st.metric("Kundfordringar", f"{customer_balance:,.0f} kr")
-        with col3:
-            st.metric("Leverantörsskulder", f"{supplier_balance:,.0f} kr")
-        with col4:
-            st.metric("Verifikationer", total_transactions)
-
-        st.divider()
-
-        # Senaste transaktioner
-        st.subheader("Senaste transaktioner")
-        if transactions:
-            for tx in transactions[-5:]:
-                with st.expander(f"Ver {tx.verification_number}: {tx.description} ({tx.transaction_date})"):
-                    for line in tx.lines:
-                        if line.debit > 0:
-                            st.write(f"  {line.account.number} {line.account.name}: {line.debit:,.2f} D")
-                        else:
-                            st.write(f"  {line.account.number} {line.account.name}: {line.credit:,.2f} K")
-        else:
-            st.info("Inga transaktioner ännu")
-    else:
+    if not fiscal_year:
         st.warning("Inget räkenskapsår finns. Skapa ett under Inställningar.")
+        return
+
+    st.caption(f"Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}")
+
+    # Hämta data
+    transactions = service.get_transactions(company_id, fiscal_year.id)
+    accounts = service.get_accounts(company_id)
+
+    # Beräkna nyckeltal
+    # Tillgångar (1xxx)
+    total_assets = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith('1')
+    )
+
+    # Eget kapital (20xx-21xx)
+    total_equity = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith(('20', '21'))
+    )
+
+    # Skulder (22xx-29xx)
+    total_liabilities = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith(('22', '23', '24', '25', '26', '27', '28', '29'))
+    )
+
+    # Intäkter (3xxx)
+    total_revenue = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith('3')
+    )
+
+    # Kostnader (4xxx-8xxx)
+    total_expenses = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number[0] in '45678'
+    )
+
+    # Resultat
+    result = total_revenue - total_expenses
+
+    # Soliditet (Eget kapital / Totala tillgångar)
+    soliditet = (float(total_equity) / float(total_assets) * 100) if total_assets != 0 else 0
+
+    # Likviditet (Likvida medel / Kortfristiga skulder)
+    liquid_assets = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith(('19', '17', '18'))  # Kassa, bank, kortfristiga placeringar
+    )
+    short_term_liabilities = sum(
+        service.get_account_balance(a.id)
+        for a in accounts if a.number.startswith(('24', '25', '26', '27', '28', '29'))
+    )
+    likviditet = (float(liquid_assets) / float(short_term_liabilities) * 100) if short_term_liabilities != 0 else 0
+
+    # === KPI-KORT ===
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Tillgångar", f"{total_assets:,.0f} kr")
+    with col2:
+        st.metric("Eget kapital", f"{total_equity:,.0f} kr")
+    with col3:
+        delta_color = "normal" if result >= 0 else "inverse"
+        st.metric("Resultat", f"{result:,.0f} kr", delta=f"{'Vinst' if result >= 0 else 'Förlust'}")
+    with col4:
+        st.metric("Verifikationer", len(transactions))
+
+    # Andra raden med nyckeltal
+    col5, col6, col7, col8 = st.columns(4)
+
+    with col5:
+        st.metric("Soliditet", f"{soliditet:.1f}%", help="Eget kapital / Totala tillgångar")
+    with col6:
+        st.metric("Skulder", f"{total_liabilities:,.0f} kr")
+    with col7:
+        st.metric("Intäkter", f"{total_revenue:,.0f} kr")
+    with col8:
+        st.metric("Kostnader", f"{total_expenses:,.0f} kr")
+
+    st.divider()
+
+    # === DIAGRAM ===
+    tab1, tab2, tab3 = st.tabs(["📊 Balans & Resultat", "📈 Utveckling över tid", "📉 Nyckeltal"])
+
+    with tab1:
+        col_chart1, col_chart2 = st.columns(2)
+
+        with col_chart1:
+            # Balansräkning som stapeldiagram
+            st.subheader("Balansräkning")
+
+            fig_balance = go.Figure()
+
+            # Tillgångar
+            fig_balance.add_trace(go.Bar(
+                name='Tillgångar',
+                x=['Tillgångar'],
+                y=[float(total_assets)],
+                marker_color='#2E86AB'
+            ))
+
+            # EK + Skulder
+            fig_balance.add_trace(go.Bar(
+                name='Eget kapital',
+                x=['EK & Skulder'],
+                y=[float(total_equity)],
+                marker_color='#28A745'
+            ))
+
+            fig_balance.add_trace(go.Bar(
+                name='Skulder',
+                x=['EK & Skulder'],
+                y=[float(total_liabilities)],
+                marker_color='#DC3545',
+                base=[float(total_equity)]
+            ))
+
+            fig_balance.update_layout(
+                barmode='stack',
+                yaxis_title='Belopp (kr)',
+                height=400,
+                showlegend=True
+            )
+
+            st.plotly_chart(fig_balance, use_container_width=True)
+
+        with col_chart2:
+            # Resultaträkning som cirkeldiagram
+            st.subheader("Resultaträkning")
+
+            if total_revenue > 0 or total_expenses > 0:
+                fig_result = go.Figure()
+
+                # Skapa data för resultatfördelning
+                labels = ['Intäkter', 'Kostnader', 'Resultat' if result >= 0 else 'Förlust']
+                values = [float(total_revenue), float(total_expenses), abs(float(result))]
+                colors = ['#28A745', '#DC3545', '#FFC107' if result >= 0 else '#6C757D']
+
+                fig_result = go.Figure(data=[go.Pie(
+                    labels=labels[:2],
+                    values=values[:2],
+                    hole=.4,
+                    marker_colors=colors[:2]
+                )])
+
+                fig_result.update_layout(
+                    height=400,
+                    annotations=[dict(text=f'Resultat<br>{result:,.0f} kr', x=0.5, y=0.5, font_size=14, showarrow=False)]
+                )
+
+                st.plotly_chart(fig_result, use_container_width=True)
+            else:
+                st.info("Ingen intäkts-/kostnadsdata att visa")
+
+    with tab2:
+        st.subheader("Utveckling per månad")
+
+        # Beräkna månatliga summor
+        if transactions:
+            from collections import defaultdict
+            monthly_data = defaultdict(lambda: {'revenue': Decimal(0), 'expenses': Decimal(0), 'balance': Decimal(0)})
+
+            for tx in transactions:
+                month_key = tx.transaction_date.strftime('%Y-%m')
+                for line in tx.lines:
+                    acc_num = line.account.number
+                    if acc_num.startswith('3'):
+                        monthly_data[month_key]['revenue'] += line.credit - line.debit
+                    elif acc_num[0] in '45678':
+                        monthly_data[month_key]['expenses'] += line.debit - line.credit
+                    elif acc_num.startswith('1'):
+                        monthly_data[month_key]['balance'] += line.debit - line.credit
+
+            # Sortera månader
+            months = sorted(monthly_data.keys())
+            revenues = [float(monthly_data[m]['revenue']) for m in months]
+            expenses = [float(monthly_data[m]['expenses']) for m in months]
+            results = [r - e for r, e in zip(revenues, expenses)]
+
+            # Kumulativt resultat
+            cumulative_result = []
+            cum = 0
+            for r in results:
+                cum += r
+                cumulative_result.append(cum)
+
+            # Skapa diagram
+            fig_trend = go.Figure()
+
+            fig_trend.add_trace(go.Bar(
+                name='Intäkter',
+                x=months,
+                y=revenues,
+                marker_color='#28A745'
+            ))
+
+            fig_trend.add_trace(go.Bar(
+                name='Kostnader',
+                x=months,
+                y=expenses,
+                marker_color='#DC3545'
+            ))
+
+            fig_trend.add_trace(go.Scatter(
+                name='Kumulativt resultat',
+                x=months,
+                y=cumulative_result,
+                mode='lines+markers',
+                line=dict(color='#FFC107', width=3),
+                yaxis='y2'
+            ))
+
+            fig_trend.update_layout(
+                barmode='group',
+                yaxis_title='Belopp (kr)',
+                yaxis2=dict(
+                    title='Kumulativt resultat (kr)',
+                    overlaying='y',
+                    side='right'
+                ),
+                height=400,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("Inga transaktioner att visa")
+
+    with tab3:
+        st.subheader("Nyckeltal")
+
+        col_kpi1, col_kpi2 = st.columns(2)
+
+        with col_kpi1:
+            # Soliditet som gauge
+            fig_soliditet = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=soliditet,
+                title={'text': "Soliditet (%)"},
+                delta={'reference': 30},  # 30% anses som bra
+                gauge={
+                    'axis': {'range': [0, 100]},
+                    'bar': {'color': "#2E86AB"},
+                    'steps': [
+                        {'range': [0, 20], 'color': "#FFCCCC"},
+                        {'range': [20, 40], 'color': "#FFFFCC"},
+                        {'range': [40, 100], 'color': "#CCFFCC"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 30
+                    }
+                }
+            ))
+
+            fig_soliditet.update_layout(height=300)
+            st.plotly_chart(fig_soliditet, use_container_width=True)
+
+            st.caption("Soliditet = Eget kapital / Totala tillgångar. >30% anses som bra.")
+
+        with col_kpi2:
+            # Skuldsättningsgrad som gauge
+            skuldsattning = (float(total_liabilities) / float(total_equity) * 100) if total_equity != 0 else 0
+
+            fig_skuld = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=skuldsattning,
+                title={'text': "Skuldsättningsgrad (%)"},
+                gauge={
+                    'axis': {'range': [0, 300]},
+                    'bar': {'color': "#DC3545"},
+                    'steps': [
+                        {'range': [0, 100], 'color': "#CCFFCC"},
+                        {'range': [100, 200], 'color': "#FFFFCC"},
+                        {'range': [200, 300], 'color': "#FFCCCC"}
+                    ]
+                }
+            ))
+
+            fig_skuld.update_layout(height=300)
+            st.plotly_chart(fig_skuld, use_container_width=True)
+
+            st.caption("Skuldsättningsgrad = Skulder / Eget kapital. <100% anses som bra.")
+
+        # Tabell med nyckeltal
+        st.subheader("Sammanfattning nyckeltal")
+
+        kpi_data = {
+            'Nyckeltal': ['Soliditet', 'Skuldsättningsgrad', 'Likviditet', 'Vinstmarginal'],
+            'Värde': [
+                f"{soliditet:.1f}%",
+                f"{skuldsattning:.1f}%",
+                f"{likviditet:.1f}%" if short_term_liabilities != 0 else "N/A",
+                f"{(float(result) / float(total_revenue) * 100):.1f}%" if total_revenue != 0 else "N/A"
+            ],
+            'Bedömning': [
+                "Bra" if soliditet > 30 else "Låg" if soliditet < 20 else "Acceptabel",
+                "Bra" if skuldsattning < 100 else "Hög" if skuldsattning > 200 else "Acceptabel",
+                "Bra" if likviditet > 100 else "Låg",
+                "Bra" if total_revenue > 0 and result > 0 else "Förlust" if result < 0 else "N/A"
+            ]
+        }
+
+        import pandas as pd
+        df_kpi = pd.DataFrame(kpi_data)
+        st.dataframe(df_kpi, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # Senaste transaktioner
+    st.subheader("Senaste transaktioner")
+    if transactions:
+        for tx in transactions[-5:]:
+            with st.expander(f"Ver {tx.verification_number}: {tx.description} ({tx.transaction_date})"):
+                for line in tx.lines:
+                    if line.debit > 0:
+                        st.write(f"  {line.account.number} {line.account.name}: {line.debit:,.2f} D")
+                    else:
+                        st.write(f"  {line.account.number} {line.account.name}: {line.credit:,.2f} K")
+    else:
+        st.info("Inga transaktioner ännu")
 
 
 def show_transactions(service: AccountingService):
@@ -801,6 +1083,86 @@ def show_opening_balances(service: AccountingService, company_id: int, accounts)
         st.rerun()
 
 
+def show_report_export_buttons(db, report_type: str, company_id: int, fiscal_year_id: int, **kwargs):
+    """Visa exportknappar för rapporter"""
+    st.divider()
+    st.write("**Exportera rapport:**")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    report_generator = ReportGenerator(db)
+
+    # Mappa rapporttyp till intern nyckel
+    type_map = {
+        "Balansräkning": "balance_sheet",
+        "Resultaträkning": "income_statement",
+        "Råbalans": "trial_balance",
+        "Huvudbok": "general_ledger",
+        "Årsredovisning": "annual_report",
+    }
+    internal_type = type_map.get(report_type)
+
+    if not internal_type:
+        st.info("Export ej tillgänglig för denna rapport")
+        return
+
+    try:
+        with col1:
+            if st.button("📄 HTML", key=f"export_html_{report_type}"):
+                data, content_type, filename = report_generator.generate_report_with_export(
+                    internal_type, company_id, fiscal_year_id, "html", **kwargs
+                )
+                st.download_button(
+                    "Ladda ner HTML",
+                    data,
+                    filename,
+                    content_type,
+                    key=f"dl_html_{report_type}"
+                )
+
+        with col2:
+            if st.button("📕 PDF", key=f"export_pdf_{report_type}"):
+                try:
+                    data, content_type, filename = report_generator.generate_report_with_export(
+                        internal_type, company_id, fiscal_year_id, "pdf", **kwargs
+                    )
+                    st.download_button(
+                        "Ladda ner PDF",
+                        data,
+                        filename,
+                        content_type,
+                        key=f"dl_pdf_{report_type}"
+                    )
+                except Exception as e:
+                    st.error(f"Kunde inte generera PDF: {e}")
+
+        with col3:
+            if st.button("📘 Word", key=f"export_docx_{report_type}"):
+                try:
+                    data, content_type, filename = report_generator.generate_report_with_export(
+                        internal_type, company_id, fiscal_year_id, "docx", **kwargs
+                    )
+                    st.download_button(
+                        "Ladda ner Word",
+                        data,
+                        filename,
+                        content_type,
+                        key=f"dl_docx_{report_type}"
+                    )
+                except Exception as e:
+                    st.error(f"Kunde inte generera Word: {e}")
+
+        with col4:
+            if st.button("🖨️ Förhandsgranska", key=f"preview_{report_type}"):
+                data, _, _ = report_generator.generate_report_with_export(
+                    internal_type, company_id, fiscal_year_id, "html", **kwargs
+                )
+                st.components.v1.html(data.decode('utf-8'), height=800, scrolling=True)
+
+    except Exception as e:
+        st.error(f"Fel vid export: {e}")
+
+
 def show_reports(service: AccountingService):
     """Visa rapporter"""
     st.title("Rapporter")
@@ -809,6 +1171,11 @@ def show_reports(service: AccountingService):
     if not company_id:
         st.info("Välj ett företag först.")
         return
+
+    # Hämta räkenskapsår för export
+    db = next(get_db())
+    fiscal_years = service.get_fiscal_years(company_id)
+    fiscal_year = fiscal_years[0] if fiscal_years else None
 
     report_type = st.selectbox(
         "Välj rapport",
@@ -820,12 +1187,20 @@ def show_reports(service: AccountingService):
         show_verification_list(service, company_id)
     elif report_type == "Huvudbok":
         show_general_ledger(service, company_id)
+        if fiscal_year:
+            show_report_export_buttons(db, report_type, company_id, fiscal_year.id)
     elif report_type == "Råbalans":
         show_trial_balance(service, company_id)
+        if fiscal_year:
+            show_report_export_buttons(db, report_type, company_id, fiscal_year.id)
     elif report_type == "Balansräkning":
         show_balance_sheet(service, company_id)
+        if fiscal_year:
+            show_report_export_buttons(db, report_type, company_id, fiscal_year.id)
     elif report_type == "Resultaträkning":
         show_income_statement(service, company_id)
+        if fiscal_year:
+            show_report_export_buttons(db, report_type, company_id, fiscal_year.id)
     elif report_type == "Momsrapport":
         show_vat_report(service, company_id)
     elif report_type == "Arbetsgivardeklaration":

@@ -446,10 +446,19 @@ class SIEImporter:
                 # Skulder/EK (2xxx): negativt värde i SIE = kreditsaldo (gör positivt)
                 # Intäkter (3xxx): negativt = kreditsaldo (gör positivt)
                 # Kostnader (4-8xxx): positivt = debetsaldo (behåll som det är)
+                #
+                # UNDANTAG: Resultatkonton (2068, 2069, 2091, 2098, 2099) kan vara
+                # negativa (förlust) och ska behålla sitt tecken!
                 first_digit = account_number[0] if account_number else '0'
 
-                if first_digit in ['2', '3']:
-                    # Skulder, EK och intäkter: SIE har ofta negativa värden
+                # Resultatkonton som kan vara negativa (förlust)
+                result_accounts = ['2068', '2069', '2091', '2098', '2099']
+
+                if account_number in result_accounts:
+                    # Resultatkonton: behåll tecken (negativ = förlust)
+                    account.opening_balance = balance
+                elif first_digit in ['2', '3']:
+                    # Övriga skulder, EK och intäkter: SIE har ofta negativa värden
                     # Vi lagrar absolut värde (positivt)
                     account.opening_balance = abs(balance)
                 else:

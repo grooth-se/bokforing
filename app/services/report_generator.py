@@ -503,3 +503,360 @@ Denna mapp innehåller Jinja2-mallar för generering av rapporter och dokument.
 <p>Resultat: {{ result|currency }}</p>
 ```
 """, encoding='utf-8')
+
+    def to_pdf(self, html_content: str) -> bytes:
+        """
+        Konvertera HTML till PDF
+
+        Args:
+            html_content: HTML-sträng
+
+        Returns:
+            PDF som bytes
+        """
+        try:
+            from weasyprint import HTML
+            pdf_bytes = HTML(string=html_content, base_url=str(self.TEMPLATE_DIR)).write_pdf()
+            return pdf_bytes
+        except ImportError:
+            raise RuntimeError("WeasyPrint är inte installerat. Kör: pip install weasyprint")
+        except Exception as e:
+            raise RuntimeError(f"Kunde inte generera PDF: {str(e)}")
+
+    def to_docx(self, html_content: str, title: str = "Rapport") -> bytes:
+        """
+        Konvertera HTML till DOCX
+
+        Args:
+            html_content: HTML-sträng
+            title: Dokumenttitel
+
+        Returns:
+            DOCX som bytes
+        """
+        try:
+            from docx import Document
+            from docx.shared import Inches, Pt
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            import io
+        except ImportError:
+            raise RuntimeError("python-docx är inte installerat. Kör: pip install python-docx")
+
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            raise RuntimeError("BeautifulSoup är inte installerat. Kör: pip install beautifulsoup4")
+
+        # Skapa Word-dokument
+        doc = Document()
+
+        # Parsa HTML
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Extrahera titel från h1 om det finns
+        h1 = soup.find('h1')
+        if h1:
+            heading = doc.add_heading(h1.get_text(strip=True), 0)
+            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # Gå igenom elementen
+        for element in soup.find_all(['h2', 'h3', 'p', 'table']):
+            if element.name == 'h2':
+                doc.add_heading(element.get_text(strip=True), 1)
+            elif element.name == 'h3':
+                doc.add_heading(element.get_text(strip=True), 2)
+            elif element.name == 'p':
+                text = element.get_text(strip=True)
+                if text:
+                    doc.add_paragraph(text)
+            elif element.name == 'table':
+                # Hantera tabeller
+                rows = element.find_all('tr')
+                if rows:
+                    # Räkna max antal kolumner
+                    max_cols = 0
+                    for row in rows:
+                        cols = len(row.find_all(['th', 'td']))
+                        max_cols = max(max_cols, cols)
+
+                    if max_cols > 0:
+                        table = doc.add_table(rows=0, cols=max_cols)
+                        table.style = 'Table Grid'
+
+                        for row in rows:
+                            cells = row.find_all(['th', 'td'])
+                            doc_row = table.add_row()
+                            for i, cell in enumerate(cells):
+                                if i < max_cols:
+                                    doc_row.cells[i].text = cell.get_text(strip=True)
+
+                        doc.add_paragraph()  # Lägg till mellanrum efter tabell
+
+        # Spara till bytes
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
+    def generate_report_with_export(
+        self,
+        report_type: str,
+        company_id: int,
+        fiscal_year_id: int,
+        output_format: str = "html",
+        **kwargs
+    ) -> tuple:
+        """
+        Generera rapport med val av exportformat
+
+        Args:
+            report_type: Rapporttyp ('annual_report', 'income_statement', 'balance_sheet', etc.)
+            company_id: Företags-ID
+            fiscal_year_id: Räkenskapsår-ID
+            output_format: 'html', 'pdf', eller 'docx'
+            **kwargs: Extra data
+
+        Returns:
+            tuple: (data_bytes, content_type, filename)
+        """
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        fiscal_year = self.db.query(FiscalYear).filter(FiscalYear.id == fiscal_year_id).first()
+
+        if not company or not fiscal_year:
+            raise ValueError("Företag eller räkenskapsår finns inte")
+
+        # Generera rapport baserat på typ
+        if report_type == 'annual_report':
+            html_content = self.generate_annual_report(company_id, fiscal_year_id, kwargs)
+            base_filename = f"arsredovisning_{company.org_number}_{fiscal_year.end_date.year}"
+        elif report_type == 'income_statement':
+            html_content = self.generate_income_statement(company_id, fiscal_year_id)
+            base_filename = f"resultatrakning_{company.org_number}_{fiscal_year.end_date.year}"
+        elif report_type == 'balance_sheet':
+            html_content = self.generate_balance_sheet(company_id, fiscal_year_id)
+            base_filename = f"balansrakning_{company.org_number}_{fiscal_year.end_date.year}"
+        elif report_type == 'trial_balance':
+            html_content = self._generate_trial_balance_report(company_id, fiscal_year_id)
+            base_filename = f"rabalans_{company.org_number}_{fiscal_year.end_date.year}"
+        elif report_type == 'general_ledger':
+            html_content = self._generate_general_ledger_report(company_id, fiscal_year_id, kwargs.get('account_filter'))
+            base_filename = f"huvudbok_{company.org_number}_{fiscal_year.end_date.year}"
+        elif report_type == 'shareholder_register':
+            html_content = self.generate_shareholder_register(company_id, kwargs.get('shareholders', []))
+            base_filename = f"aktiebok_{company.org_number}"
+        else:
+            raise ValueError(f"Okänd rapporttyp: {report_type}")
+
+        # Konvertera till önskat format
+        if output_format == "html":
+            return html_content.encode('utf-8'), "text/html", f"{base_filename}.html"
+        elif output_format == "pdf":
+            pdf_data = self.to_pdf(html_content)
+            return pdf_data, "application/pdf", f"{base_filename}.pdf"
+        elif output_format == "docx":
+            docx_data = self.to_docx(html_content, report_type)
+            return docx_data, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"{base_filename}.docx"
+        else:
+            raise ValueError(f"Okänt format: {output_format}")
+
+    def _generate_trial_balance_report(self, company_id: int, fiscal_year_id: int) -> str:
+        """Generera råbalansrapport"""
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        fiscal_year = self.db.query(FiscalYear).filter(FiscalYear.id == fiscal_year_id).first()
+        trial_balance = self.accounting_service.get_trial_balance(company_id, fiscal_year.end_date)
+
+        # Kontrollera om mall finns
+        template_path = self.TEMPLATE_TYPES.get('trial_balance')
+        if template_path and (self.TEMPLATE_DIR / template_path).exists():
+            template = self.env.get_template(template_path)
+            return template.render(
+                company=company,
+                fiscal_year=fiscal_year,
+                trial_balance=trial_balance,
+                generated_at=datetime.now()
+            )
+
+        # Standardrapport
+        total_debit = sum(item.get('debit', 0) for item in trial_balance)
+        total_credit = sum(item.get('credit', 0) for item in trial_balance)
+
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="sv">
+        <head>
+            <meta charset="UTF-8">
+            <title>Råbalans - {company.name}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                h1 {{ color: #2c5282; border-bottom: 2px solid #2c5282; }}
+                table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                th, td {{ padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+                th {{ background-color: #edf2f7; }}
+                .amount {{ text-align: right; font-family: monospace; }}
+                .total {{ font-weight: bold; background-color: #e2e8f0; }}
+            </style>
+        </head>
+        <body>
+            <h1>Råbalans</h1>
+            <p><strong>{company.name}</strong> | Org.nr: {company.org_number}</p>
+            <p>Per: {fiscal_year.end_date}</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Konto</th>
+                        <th>Namn</th>
+                        <th class="amount">Debet</th>
+                        <th class="amount">Kredit</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        for item in trial_balance:
+            debit = item.get('debit', 0)
+            credit = item.get('credit', 0)
+            html += f"""
+                    <tr>
+                        <td>{item['account_number']}</td>
+                        <td>{item['account_name']}</td>
+                        <td class="amount">{debit:,.0f} kr</td>
+                        <td class="amount">{credit:,.0f} kr</td>
+                    </tr>
+            """
+
+        html += f"""
+                    <tr class="total">
+                        <td></td>
+                        <td><strong>Summa</strong></td>
+                        <td class="amount"><strong>{total_debit:,.0f} kr</strong></td>
+                        <td class="amount"><strong>{total_credit:,.0f} kr</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+            <p>Genererad: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+        </body>
+        </html>
+        """
+        return html
+
+    def _generate_general_ledger_report(
+        self,
+        company_id: int,
+        fiscal_year_id: int,
+        account_filter: str = None
+    ) -> str:
+        """Generera huvudboksrapport"""
+        company = self.db.query(Company).filter(Company.id == company_id).first()
+        fiscal_year = self.db.query(FiscalYear).filter(FiscalYear.id == fiscal_year_id).first()
+
+        accounts = self.accounting_service.get_accounts(company_id)
+        transactions = self.accounting_service.get_transactions(company_id, fiscal_year_id)
+
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="sv">
+        <head>
+            <meta charset="UTF-8">
+            <title>Huvudbok - {company.name}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; font-size: 10pt; }}
+                h1 {{ color: #2c5282; border-bottom: 2px solid #2c5282; }}
+                h2 {{ color: #2c5282; margin-top: 30px; page-break-before: auto; }}
+                table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+                th, td {{ padding: 6px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+                th {{ background-color: #edf2f7; }}
+                .amount {{ text-align: right; font-family: monospace; }}
+                .total {{ font-weight: bold; background-color: #bee3f8; }}
+                .ib {{ font-style: italic; color: #666; }}
+            </style>
+        </head>
+        <body>
+            <h1>Huvudbok</h1>
+            <p><strong>{company.name}</strong> | Org.nr: {company.org_number}</p>
+            <p>Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}</p>
+        """
+
+        from app.config import AccountType
+
+        for account in accounts:
+            if account_filter and not account.number.startswith(account_filter):
+                continue
+
+            # Hitta transaktioner för detta konto
+            account_txs = []
+            running_balance = account.opening_balance or Decimal(0)
+
+            for tx in transactions:
+                for line in tx.lines:
+                    if line.account_id == account.id:
+                        if account.account_type in [AccountType.ASSET, AccountType.EXPENSE]:
+                            running_balance += line.debit - line.credit
+                        else:
+                            running_balance += line.credit - line.debit
+
+                        account_txs.append({
+                            'date': tx.transaction_date,
+                            'ver': tx.verification_number,
+                            'desc': tx.description,
+                            'debit': line.debit,
+                            'credit': line.credit,
+                            'balance': running_balance
+                        })
+
+            if account_txs or (account.opening_balance and account.opening_balance != 0):
+                html += f"""
+                <h2>{account.number} {account.name}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Ver</th>
+                            <th>Beskrivning</th>
+                            <th class="amount">Debet</th>
+                            <th class="amount">Kredit</th>
+                            <th class="amount">Saldo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="ib">
+                            <td></td>
+                            <td></td>
+                            <td>Ingående balans</td>
+                            <td class="amount"></td>
+                            <td class="amount"></td>
+                            <td class="amount">{account.opening_balance or 0:,.0f} kr</td>
+                        </tr>
+                """
+
+                for tx in account_txs:
+                    html += f"""
+                        <tr>
+                            <td>{tx['date']}</td>
+                            <td>{tx['ver']}</td>
+                            <td>{tx['desc']}</td>
+                            <td class="amount">{tx['debit']:,.0f} kr</td>
+                            <td class="amount">{tx['credit']:,.0f} kr</td>
+                            <td class="amount">{tx['balance']:,.0f} kr</td>
+                        </tr>
+                    """
+
+                html += f"""
+                        <tr class="total">
+                            <td></td>
+                            <td></td>
+                            <td>Utgående balans</td>
+                            <td class="amount"></td>
+                            <td class="amount"></td>
+                            <td class="amount">{running_balance:,.0f} kr</td>
+                        </tr>
+                    </tbody>
+                </table>
+                """
+
+        html += f"""
+            <p>Genererad: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+        </body>
+        </html>
+        """
+        return html
