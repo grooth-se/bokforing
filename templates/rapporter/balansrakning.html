@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balansräkning - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.4;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            border-bottom: 2px solid #2c5282;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .logo {
+            max-width: 120px;
+            max-height: 60px;
+        }
+        h1 {
+            color: #2c5282;
+            font-size: 18pt;
+            margin: 0;
+        }
+        h2 {
+            color: #2c5282;
+            font-size: 14pt;
+            margin: 20px 0 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 5px;
+        }
+        .company-name {
+            font-size: 14pt;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .period {
+            color: #666;
+            font-size: 10pt;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        th, td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #edf2f7;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        .amount {
+            text-align: right;
+            font-family: 'Consolas', monospace;
+        }
+        .account-number {
+            color: #718096;
+            font-size: 9pt;
+            width: 60px;
+        }
+        .total-row {
+            font-weight: bold;
+            background-color: #e2e8f0;
+            border-top: 2px solid #2c5282;
+        }
+        .subtotal-row {
+            font-weight: bold;
+            background-color: #f7fafc;
+        }
+        .section-header {
+            background-color: #2c5282;
+            color: white;
+            font-weight: bold;
+        }
+        .group-header {
+            background-color: #bee3f8;
+            font-weight: bold;
+            font-style: italic;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 8pt;
+            color: #718096;
+            text-align: center;
+        }
+        .note {
+            font-size: 9pt;
+            color: #718096;
+            margin: 10px 0;
+        }
+        .balance-check {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .balance-ok {
+            background-color: #c6f6d5;
+            color: #276749;
+        }
+        .balance-error {
+            background-color: #fed7d7;
+            color: #c53030;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <h1>Balansräkning</h1>
+                <p class="company-name">{{ company.name }}</p>
+                <p class="period">
+                    Org.nr: {{ company.org_number }}<br>
+                    Per: {{ fiscal_year.end_date|date_format }}
+                </p>
+            </div>
+            {% if logo_base64 %}
+            <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+            {% endif %}
+        </div>
+    </div>
+
+    <p class="note">Belopp i kronor</p>
+
+    <h2>Tillgångar</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="account-number">Konto</th>
+                <th>Beskrivning</th>
+                <th class="amount">Belopp</th>
+                {% if show_previous %}
+                <th class="amount">Föreg. år</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Anläggningstillgångar -->
+            <tr class="section-header">
+                <td colspan="{{ '4' if show_previous else '3' }}">Anläggningstillgångar</td>
+            </tr>
+            {% for item in balance_sheet.fixed_assets %}
+            <tr>
+                <td class="account-number">{{ item.account_number }}</td>
+                <td>{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td></td>
+                <td>Summa anläggningstillgångar</td>
+                <td class="amount">{{ balance_sheet.total_fixed_assets|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_fixed_assets|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <!-- Omsättningstillgångar -->
+            <tr class="section-header">
+                <td colspan="{{ '4' if show_previous else '3' }}">Omsättningstillgångar</td>
+            </tr>
+            {% for item in balance_sheet.current_assets %}
+            <tr>
+                <td class="account-number">{{ item.account_number }}</td>
+                <td>{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td></td>
+                <td>Summa omsättningstillgångar</td>
+                <td class="amount">{{ balance_sheet.total_current_assets|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_current_assets|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr class="total-row">
+                <td></td>
+                <td>SUMMA TILLGÅNGAR</td>
+                <td class="amount">{{ balance_sheet.total_assets|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_assets|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Eget kapital och skulder</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="account-number">Konto</th>
+                <th>Beskrivning</th>
+                <th class="amount">Belopp</th>
+                {% if show_previous %}
+                <th class="amount">Föreg. år</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Eget kapital -->
+            <tr class="section-header">
+                <td colspan="{{ '4' if show_previous else '3' }}">Eget kapital</td>
+            </tr>
+            {% for item in balance_sheet.equity %}
+            <tr>
+                <td class="account-number">{{ item.account_number }}</td>
+                <td>{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td></td>
+                <td>Summa eget kapital</td>
+                <td class="amount">{{ balance_sheet.total_equity|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_equity|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <!-- Långfristiga skulder -->
+            <tr class="section-header">
+                <td colspan="{{ '4' if show_previous else '3' }}">Långfristiga skulder</td>
+            </tr>
+            {% for item in balance_sheet.long_term_liabilities %}
+            <tr>
+                <td class="account-number">{{ item.account_number }}</td>
+                <td>{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td></td>
+                <td>Summa långfristiga skulder</td>
+                <td class="amount">{{ balance_sheet.total_long_term|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_long_term|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <!-- Kortfristiga skulder -->
+            <tr class="section-header">
+                <td colspan="{{ '4' if show_previous else '3' }}">Kortfristiga skulder</td>
+            </tr>
+            {% for item in balance_sheet.short_term_liabilities %}
+            <tr>
+                <td class="account-number">{{ item.account_number }}</td>
+                <td>{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td></td>
+                <td>Summa kortfristiga skulder</td>
+                <td class="amount">{{ balance_sheet.total_short_term|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_short_term|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr class="total-row">
+                <td></td>
+                <td>SUMMA EGET KAPITAL OCH SKULDER</td>
+                <td class="amount">{{ balance_sheet.total_liabilities|currency }}</td>
+                {% if show_previous %}
+                <td class="amount">{{ previous_balance_sheet.total_liabilities|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    {% if balance_sheet.total_assets == balance_sheet.total_liabilities %}
+    <div class="balance-check balance-ok">
+        Balansräkningen stämmer: Tillgångar = Eget kapital och skulder
+    </div>
+    {% else %}
+    <div class="balance-check balance-error">
+        Varning: Balansräkningen stämmer inte!<br>
+        Tillgångar: {{ balance_sheet.total_assets|currency }}<br>
+        Eget kapital och skulder: {{ balance_sheet.total_liabilities|currency }}<br>
+        Differens: {{ (balance_sheet.total_assets - balance_sheet.total_liabilities)|currency }}
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        <p>{{ company.name }} | Org.nr: {{ company.org_number }}</p>
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>

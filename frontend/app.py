@@ -220,7 +220,10 @@ def show_transactions(service: AccountingService):
 
     st.divider()
 
-    tab1, tab2 = st.tabs(["Visa transaktioner", "Ny transaktion"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Visa transaktioner", "Ny transaktion", "Konteringsmallar", "Periodiseringar"])
+
+    accounts = service.get_accounts(company_id)
+    account_options = {f"{a.number} - {a.name}": a.id for a in accounts}
 
     with tab1:
         transactions = service.get_transactions(company_id, fiscal_year.id)
@@ -242,9 +245,6 @@ def show_transactions(service: AccountingService):
 
     with tab2:
         st.subheader("Skapa ny transaktion")
-
-        accounts = service.get_accounts(company_id)
-        account_options = {f"{a.number} - {a.name}": a.id for a in accounts}
 
         with st.form("new_transaction"):
             date = st.date_input("Datum")
@@ -288,6 +288,299 @@ def show_transactions(service: AccountingService):
                         st.error(f"Fel: {e}")
                 else:
                     st.error("Fyll i beskrivning och minst 2 konteringsrader")
+
+    with tab3:
+        show_transaction_templates(service, company_id, fiscal_year, account_options)
+
+    with tab4:
+        show_accruals(service, company_id, fiscal_year, account_options)
+
+
+def show_transaction_templates(service, company_id, fiscal_year, account_options):
+    """Visa och använd konteringsmallar"""
+    from app.services.template import TemplateService
+    from app.models import get_db
+    from decimal import Decimal
+
+    st.subheader("Konteringsmallar")
+
+    st.write("""
+    Använd mallar för återkommande transaktioner som momskontering, lön, hyra etc.
+    """)
+
+    db = next(get_db())
+    template_service = TemplateService(db)
+
+    # Lista mallar
+    templates = template_service.get_templates(company_id)
+
+    if not templates:
+        st.info("Inga mallar skapade ännu")
+        if st.button("Skapa standardmallar"):
+            created = template_service.initialize_standard_templates(company_id)
+            if created:
+                st.success(f"{len(created)} standardmallar skapade!")
+                st.rerun()
+            else:
+                st.warning("Kontrollera att BAS-kontoplanen är laddad")
+    else:
+        # Använd mall
+        st.write("**Använd mall**")
+
+        template_options = {t.name: t for t in templates}
+        selected_template_name = st.selectbox(
+            "Välj mall",
+            options=list(template_options.keys()),
+            key="template_select"
+        )
+        template = template_options[selected_template_name]
+
+        if template:
+            st.caption(f"Kategori: {template.category or 'Ingen'} | Använd: {template.usage_count} gånger")
+
+            if template.description:
+                st.write(template.description)
+
+            # Visa mallens konteringsrader
+            with st.expander("Visa mallstruktur"):
+                for line in template.lines:
+                    side = "Debet" if line.is_debit else "Kredit"
+                    if line.amount_percentage:
+                        amount_str = f"{line.amount_percentage}%"
+                    elif line.amount_fixed:
+                        amount_str = f"{line.amount_fixed:,.2f} kr"
+                    else:
+                        amount_str = "Resterande"
+                    st.write(f"- {line.account.number} {line.account.name}: {side} {amount_str}")
+
+            # Formulär för att använda mallen
+            with st.form("use_template"):
+                tx_date = st.date_input("Datum", key="template_date")
+                total_amount = st.number_input(
+                    "Totalbelopp (inkl moms)",
+                    min_value=0.01,
+                    step=100.0,
+                    key="template_amount"
+                )
+                tx_description = st.text_input(
+                    "Beskrivning",
+                    value=f"Transaktion från mall: {template.name}",
+                    key="template_desc"
+                )
+
+                if st.form_submit_button("Skapa transaktion från mall", type="primary"):
+                    try:
+                        tx = template_service.apply_template(
+                            template=template,
+                            fiscal_year_id=fiscal_year.id,
+                            transaction_date=tx_date,
+                            total_amount=Decimal(str(total_amount)),
+                            description=tx_description
+                        )
+                        st.success(f"Transaktion {tx.verification_number} skapad!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Fel: {e}")
+
+    st.divider()
+
+    # Skapa ny mall
+    st.write("**Skapa ny mall**")
+
+    with st.expander("Lägg till mall"):
+        with st.form("new_template"):
+            name = st.text_input("Mallnamn")
+            description = st.text_area("Beskrivning", height=60)
+            category = st.text_input("Kategori", placeholder="T.ex. Moms, Lön, Hyra")
+
+            st.write("**Konteringsrader:**")
+            st.caption("Ange procent av totalbelopp för varje rad. Den sista raden kan vara 'resterande'.")
+
+            template_lines = []
+            for i in range(4):
+                col1, col2, col3, col4 = st.columns([3, 1, 2, 1])
+                with col1:
+                    acc = st.selectbox(f"Konto", [""] + list(account_options.keys()), key=f"tmpl_acc_{i}")
+                with col2:
+                    is_debit = st.checkbox("Debet", key=f"tmpl_deb_{i}")
+                with col3:
+                    pct = st.number_input("Procent", min_value=0.0, max_value=100.0, key=f"tmpl_pct_{i}")
+                with col4:
+                    is_rem = st.checkbox("Rest", key=f"tmpl_rem_{i}")
+
+                if acc:
+                    template_lines.append({
+                        'account_id': account_options[acc],
+                        'is_debit': is_debit,
+                        'percentage': pct if pct > 0 and not is_rem else None,
+                        'is_remainder': is_rem
+                    })
+
+            if st.form_submit_button("Skapa mall"):
+                if name and len(template_lines) >= 2:
+                    try:
+                        new_template = template_service.create_template(
+                            company_id=company_id,
+                            name=name,
+                            description=description,
+                            category=category,
+                            lines=template_lines
+                        )
+                        st.success(f"Mall '{name}' skapad!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Fel: {e}")
+                else:
+                    st.error("Ange namn och minst 2 konteringsrader")
+
+    db.close()
+
+
+def show_accruals(service, company_id, fiscal_year, account_options):
+    """Visa och hantera periodiseringar"""
+    from app.services.accrual import AccrualService
+    from app.models import get_db
+    from app.models.accrual import AccrualType, AccrualFrequency
+    from decimal import Decimal
+    from datetime import date
+
+    st.subheader("Periodiseringar")
+
+    st.write("""
+    Skapa periodiseringar för kostnader eller intäkter som ska fördelas över flera perioder.
+    Transaktioner skapas automatiskt varje månad/kvartal så länge periodiseringen är aktiv.
+    """)
+
+    db = next(get_db())
+    accrual_service = AccrualService(db)
+
+    # Lista aktiva periodiseringar
+    accruals = accrual_service.get_accruals(company_id, active_only=True)
+
+    if accruals:
+        st.write("**Aktiva periodiseringar:**")
+
+        for acc in accruals:
+            status = f"{acc.periods - acc.periods_remaining}/{acc.periods} perioder bokförda"
+            with st.expander(f"{acc.name} - {status}"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**Typ:** {acc.accrual_type.value}")
+                    st.write(f"**Totalbelopp:** {acc.total_amount:,.2f} kr")
+                    st.write(f"**Per period:** {acc.amount_per_period:,.2f} kr")
+                    st.write(f"**Återstående:** {acc.remaining_amount:,.2f} kr")
+
+                with col2:
+                    st.write(f"**Startdatum:** {acc.start_date}")
+                    st.write(f"**Slutdatum:** {acc.end_date}")
+                    st.write(f"**Frekvens:** {acc.frequency.value}")
+                    st.write(f"**Auto-generering:** {'Ja' if acc.auto_generate else 'Nej'}")
+
+                # Visa bokförda perioder
+                if acc.entries:
+                    st.write("**Bokförda perioder:**")
+                    for entry in acc.entries:
+                        status_icon = "✅" if entry.is_booked else "⏳"
+                        st.caption(f"{status_icon} Period {entry.period_number}: {entry.period_date} - {entry.amount:,.2f} kr")
+
+                # Avsluta periodisering
+                if st.button("Avsluta periodisering", key=f"deactivate_{acc.id}"):
+                    accrual_service.deactivate_accrual(acc.id)
+                    st.success("Periodisering avslutad")
+                    st.rerun()
+    else:
+        st.info("Inga aktiva periodiseringar")
+
+    # Kör väntande periodiseringar
+    st.divider()
+    st.write("**Kör periodiseringar**")
+
+    pending = accrual_service.get_pending_entries(company_id)
+
+    if pending:
+        st.write(f"**{len(pending)} väntande periodiseringar:**")
+        for p in pending[:5]:
+            st.caption(f"- {p['accrual_name']}: Period {p['period_number']} ({p['period_date']}) - {p['amount']:,.2f} kr")
+
+        if st.button("Kör alla väntande periodiseringar", type="primary"):
+            entries = accrual_service.run_auto_accruals(company_id)
+            if entries:
+                st.success(f"{len(entries)} periodiseringstransaktioner skapade!")
+                st.rerun()
+            else:
+                st.info("Inga periodiseringar att köra")
+    else:
+        st.success("Alla periodiseringar är uppdaterade")
+
+    # Skapa ny periodisering
+    st.divider()
+    st.write("**Skapa ny periodisering**")
+
+    with st.form("new_accrual"):
+        name = st.text_input("Namn", placeholder="T.ex. 'Försäkring 2024'")
+        description = st.text_area("Beskrivning", height=60)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            accrual_type = st.selectbox(
+                "Typ av periodisering",
+                options=[t for t in AccrualType],
+                format_func=lambda x: x.value
+            )
+            total_amount = st.number_input("Totalbelopp", min_value=0.01, step=100.0)
+            periods = st.number_input("Antal perioder", min_value=1, max_value=60, value=12)
+
+        with col2:
+            start_date = st.date_input("Startdatum", value=date.today().replace(day=1))
+            frequency = st.selectbox(
+                "Frekvens",
+                options=[f for f in AccrualFrequency],
+                format_func=lambda x: x.value
+            )
+            auto_generate = st.checkbox("Generera transaktioner automatiskt", value=True)
+
+        st.write("**Konton:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            source_acc = st.selectbox(
+                "Källkonto (t.ex. förutbetald kostnad)",
+                options=list(account_options.keys()),
+                key="accrual_source"
+            )
+        with col2:
+            target_acc = st.selectbox(
+                "Målkonto (t.ex. kostnadskonto)",
+                options=list(account_options.keys()),
+                key="accrual_target"
+            )
+
+        if st.form_submit_button("Skapa periodisering", type="primary"):
+            if name and total_amount > 0 and source_acc and target_acc:
+                try:
+                    accrual = accrual_service.create_accrual(
+                        company_id=company_id,
+                        fiscal_year_id=fiscal_year.id,
+                        name=name,
+                        description=description,
+                        accrual_type=accrual_type,
+                        total_amount=Decimal(str(total_amount)),
+                        periods=periods,
+                        start_date=start_date,
+                        source_account_id=account_options[source_acc],
+                        target_account_id=account_options[target_acc],
+                        frequency=frequency,
+                        auto_generate=auto_generate
+                    )
+                    st.success(f"Periodisering '{name}' skapad!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Fel: {e}")
+            else:
+                st.error("Fyll i alla obligatoriska fält")
+
+    db.close()
 
 
 def show_accounts(service: AccountingService):
@@ -1603,11 +1896,12 @@ def show_settings(service: AccountingService):
     company = service.get_company(company_id)
 
     # Flikar för olika inställningar
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Företagsuppgifter",
         "Dokument",
         "Årsredovisningar",
-        "Räkenskapsår"
+        "Räkenskapsår",
+        "Backup"
     ])
 
     with tab1:
@@ -1621,6 +1915,9 @@ def show_settings(service: AccountingService):
 
     with tab4:
         show_fiscal_years_settings(service, company_id)
+
+    with tab5:
+        show_backup_settings(db)
 
     db.close()
 
@@ -2099,6 +2396,146 @@ def show_fiscal_years_settings(service, company_id: int):
                 st.rerun()
             except Exception as e:
                 st.error(f"Fel: {e}")
+
+
+def show_backup_settings(db):
+    """Visa och konfigurera backup-inställningar"""
+    from app.services.backup import BackupService, BackupConfig
+
+    st.subheader("Säkerhetskopiering")
+
+    st.write("""
+    Konfigurera automatisk säkerhetskopiering till en nätverksplats.
+    Om datorn inte är ansluten till nätverket vid backup-tillfället,
+    körs kopieringen automatiskt när anslutningen återupprättas.
+    """)
+
+    # Ladda konfiguration
+    config = BackupConfig()
+
+    # Backup-sökväg
+    st.write("**Backup-plats**")
+    backup_path = st.text_input(
+        "Sökväg till backup-mapp",
+        value=config.backup_path,
+        placeholder="/Volumes/NAS/backup/bokforing eller //server/share/backup",
+        help="Ange sökväg till en mapp på ditt lokala nätverk"
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        interval = st.number_input(
+            "Backup-intervall (timmar)",
+            min_value=1,
+            max_value=168,
+            value=config.interval_hours,
+            help="Hur ofta backup ska köras"
+        )
+    with col2:
+        retention = st.number_input(
+            "Behåll backups (dagar)",
+            min_value=7,
+            max_value=365,
+            value=config.retention_days,
+            help="Hur länge gamla backups sparas"
+        )
+
+    enabled = st.checkbox("Aktivera automatisk backup", value=config.enabled)
+
+    if st.button("Spara inställningar"):
+        config.backup_path = backup_path
+        config.interval_hours = interval
+        config.retention_days = retention
+        config.enabled = enabled
+        st.success("Inställningar sparade!")
+
+    st.divider()
+
+    # Manuell backup
+    st.write("**Manuell backup**")
+
+    if backup_path:
+        backup_service = BackupService(
+            db_path="data/bokforing.db",
+            backup_base_path=backup_path,
+            retention_days=retention
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if backup_service.is_network_available():
+                st.success("Nätverksplatsen är tillgänglig")
+            else:
+                st.warning("Nätverksplatsen är inte tillgänglig")
+
+        with col2:
+            if st.button("Kör backup nu", type="primary"):
+                with st.spinner("Skapar backup..."):
+                    result = backup_service.create_backup(db)
+
+                if result['success']:
+                    st.success(f"Backup skapad: {result['backup_name']}")
+                    config.last_backup = result['backup_name']
+                else:
+                    st.error(f"Backup misslyckades: {result.get('error', 'Okänt fel')}")
+
+        # Lista befintliga backups
+        st.divider()
+        st.write("**Befintliga backups**")
+
+        backups = backup_service.list_backups()
+        if backups:
+            for backup in backups[:10]:  # Visa max 10
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.write(f"**{backup['name']}**")
+                with col2:
+                    size_mb = backup['db_size'] / (1024 * 1024) if backup['db_size'] else 0
+                    st.caption(f"{size_mb:.1f} MB, {backup['documents_count']} dok")
+                with col3:
+                    if st.button("Återställ", key=f"restore_{backup['name']}"):
+                        if st.session_state.get(f"confirm_restore_{backup['name']}"):
+                            result = backup_service.restore_backup(backup['name'])
+                            if result['success']:
+                                st.success("Återställd! Starta om appen.")
+                            else:
+                                st.error(f"Fel: {result.get('error')}")
+                        else:
+                            st.session_state[f"confirm_restore_{backup['name']}"] = True
+                            st.warning("Klicka igen för att bekräfta återställning")
+        else:
+            st.info("Inga backups hittades")
+    else:
+        st.info("Ange en backup-sökväg för att aktivera backup-funktionen")
+
+    # Dokumentexport
+    st.divider()
+    st.write("**Exportera alla dokument**")
+    st.write("Ladda ner alla uppladdade dokument som en ZIP-fil.")
+
+    if st.button("Exportera dokument"):
+        from app.models import CompanyDocument
+        import zipfile
+        import io
+
+        documents = db.query(CompanyDocument).all()
+
+        if documents:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for doc in documents:
+                    filename = f"{doc.document_type.value}/{doc.filename}"
+                    zip_file.writestr(filename, doc.file_data)
+
+            st.download_button(
+                "Ladda ner ZIP",
+                data=zip_buffer.getvalue(),
+                file_name=f"dokument_export_{date.today()}.zip",
+                mime="application/zip"
+            )
+        else:
+            st.info("Inga dokument att exportera")
 
 
 def show_document_scanner(service: AccountingService, db):

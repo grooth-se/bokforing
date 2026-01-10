@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Råbalans - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1.5cm;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 9pt;
+            line-height: 1.3;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 15px;
+        }
+        .header {
+            border-bottom: 2px solid #2c5282;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .logo {
+            max-width: 100px;
+            max-height: 50px;
+        }
+        h1 {
+            color: #2c5282;
+            font-size: 16pt;
+            margin: 0;
+        }
+        .company-name {
+            font-size: 12pt;
+            font-weight: bold;
+            margin: 3px 0;
+        }
+        .period {
+            color: #666;
+            font-size: 9pt;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            font-size: 8pt;
+        }
+        th, td {
+            padding: 5px 8px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #2c5282;
+            color: white;
+            font-weight: bold;
+        }
+        .amount {
+            text-align: right;
+            font-family: 'Consolas', monospace;
+        }
+        .account-number {
+            width: 50px;
+        }
+        .account-name {
+            width: 200px;
+        }
+        .total-row {
+            font-weight: bold;
+            background-color: #e2e8f0;
+            border-top: 2px solid #2c5282;
+        }
+        .group-header {
+            background-color: #bee3f8;
+            font-weight: bold;
+        }
+        .zero-balance {
+            color: #a0aec0;
+        }
+        .footer {
+            margin-top: 20px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 8pt;
+            color: #718096;
+            text-align: center;
+        }
+        .summary-box {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 5px;
+        }
+        .summary-table {
+            width: auto;
+            margin: 0;
+        }
+        .summary-table td {
+            padding: 3px 15px 3px 0;
+            border: none;
+        }
+        .balance-ok {
+            color: #2f855a;
+            font-weight: bold;
+        }
+        .balance-error {
+            color: #c53030;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <h1>Råbalans</h1>
+                <p class="company-name">{{ company.name }}</p>
+                <p class="period">
+                    Org.nr: {{ company.org_number }}<br>
+                    Period: {{ fiscal_year.start_date|date_format }} - {{ fiscal_year.end_date|date_format }}
+                </p>
+            </div>
+            {% if logo_base64 %}
+            <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+            {% endif %}
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th class="account-number">Konto</th>
+                <th class="account-name">Kontonamn</th>
+                <th class="amount">IB Debet</th>
+                <th class="amount">IB Kredit</th>
+                <th class="amount">Periodens Debet</th>
+                <th class="amount">Periodens Kredit</th>
+                <th class="amount">UB Debet</th>
+                <th class="amount">UB Kredit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set current_group = namespace(value='') %}
+            {% for item in trial_balance %}
+            {% set group = item.account_number[:1] + '000' %}
+            {% if group != current_group.value %}
+            {% set current_group.value = group %}
+            <tr class="group-header">
+                <td colspan="8">
+                    {% if group == '1000' %}Tillgångar (1xxx)
+                    {% elif group == '2000' %}Eget kapital och skulder (2xxx)
+                    {% elif group == '3000' %}Intäkter (3xxx)
+                    {% elif group == '4000' %}Kostnader för varor (4xxx)
+                    {% elif group == '5000' %}Övriga externa kostnader (5xxx)
+                    {% elif group == '6000' %}Övriga externa kostnader (6xxx)
+                    {% elif group == '7000' %}Personal och avskrivningar (7xxx)
+                    {% elif group == '8000' %}Finansiella poster (8xxx)
+                    {% else %}Övrigt ({{ group }})
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            <tr class="{% if item.closing_debit == 0 and item.closing_credit == 0 %}zero-balance{% endif %}">
+                <td class="account-number">{{ item.account_number }}</td>
+                <td class="account-name">{{ item.account_name }}</td>
+                <td class="amount">{{ item.opening_debit|currency if item.opening_debit else '' }}</td>
+                <td class="amount">{{ item.opening_credit|currency if item.opening_credit else '' }}</td>
+                <td class="amount">{{ item.period_debit|currency if item.period_debit else '' }}</td>
+                <td class="amount">{{ item.period_credit|currency if item.period_credit else '' }}</td>
+                <td class="amount">{{ item.closing_debit|currency if item.closing_debit else '' }}</td>
+                <td class="amount">{{ item.closing_credit|currency if item.closing_credit else '' }}</td>
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+                <td colspan="2">SUMMA</td>
+                <td class="amount">{{ totals.opening_debit|currency }}</td>
+                <td class="amount">{{ totals.opening_credit|currency }}</td>
+                <td class="amount">{{ totals.period_debit|currency }}</td>
+                <td class="amount">{{ totals.period_credit|currency }}</td>
+                <td class="amount">{{ totals.closing_debit|currency }}</td>
+                <td class="amount">{{ totals.closing_credit|currency }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="summary-box">
+        <table class="summary-table">
+            <tr>
+                <td>Ingående balans:</td>
+                <td class="{% if totals.opening_debit == totals.opening_credit %}balance-ok{% else %}balance-error{% endif %}">
+                    {% if totals.opening_debit == totals.opening_credit %}
+                    Stämmer ({{ totals.opening_debit|currency }})
+                    {% else %}
+                    Differens: {{ (totals.opening_debit - totals.opening_credit)|currency }}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Periodens transaktioner:</td>
+                <td class="{% if totals.period_debit == totals.period_credit %}balance-ok{% else %}balance-error{% endif %}">
+                    {% if totals.period_debit == totals.period_credit %}
+                    Stämmer ({{ totals.period_debit|currency }})
+                    {% else %}
+                    Differens: {{ (totals.period_debit - totals.period_credit)|currency }}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Utgående balans:</td>
+                <td class="{% if totals.closing_debit == totals.closing_credit %}balance-ok{% else %}balance-error{% endif %}">
+                    {% if totals.closing_debit == totals.closing_credit %}
+                    Stämmer ({{ totals.closing_debit|currency }})
+                    {% else %}
+                    Differens: {{ (totals.closing_debit - totals.closing_credit)|currency }}
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="footer">
+        <p>{{ company.name }} | Org.nr: {{ company.org_number }}</p>
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>

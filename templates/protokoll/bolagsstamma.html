@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bolagsstämmoprotokoll - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2.5cm;
+        }
+        body {
+            font-family: 'Times New Roman', serif;
+            font-size: 12pt;
+            line-height: 1.6;
+            color: #000;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 20px;
+        }
+        .logo {
+            max-width: 100px;
+            max-height: 50px;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 20pt;
+            margin: 10px 0;
+            text-transform: uppercase;
+        }
+        h2 {
+            font-size: 14pt;
+            margin: 25px 0 10px 0;
+        }
+        .company-name {
+            font-size: 16pt;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .org-number {
+            font-size: 11pt;
+            color: #444;
+        }
+        .meeting-type {
+            font-size: 14pt;
+            font-style: italic;
+            margin-top: 10px;
+        }
+        .meeting-info {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+        }
+        .meeting-info p {
+            margin: 5px 0;
+        }
+        .section {
+            margin: 25px 0;
+        }
+        .section-number {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .section-title {
+            font-weight: bold;
+            text-decoration: underline;
+        }
+        .section-content {
+            margin: 10px 0 10px 30px;
+        }
+        .decision {
+            margin: 10px 0;
+            padding: 10px 15px;
+            background-color: #e8e8e8;
+            border-left: 4px solid #333;
+        }
+        .decision-label {
+            font-weight: bold;
+            font-style: italic;
+        }
+        .attendance-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .attendance-table th,
+        .attendance-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        .attendance-table th {
+            background-color: #f0f0f0;
+        }
+        .amount {
+            text-align: right;
+        }
+        .signature-section {
+            margin-top: 50px;
+            page-break-inside: avoid;
+        }
+        .signature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-top: 30px;
+        }
+        .signature-block {
+            margin-top: 20px;
+        }
+        .signature-line {
+            border-bottom: 1px solid #000;
+            height: 30px;
+            margin-bottom: 5px;
+        }
+        .signature-name {
+            font-size: 10pt;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+            font-size: 9pt;
+            color: #666;
+            text-align: center;
+        }
+        .note {
+            font-size: 10pt;
+            font-style: italic;
+            color: #666;
+            margin: 10px 0;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if logo_base64 %}
+        <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+        {% endif %}
+        <h1>Protokoll</h1>
+        <p class="meeting-type">{{ meeting.type|default('Årsstämma') }}</p>
+        <p class="company-name">{{ company.name }}</p>
+        <p class="org-number">Org.nr: {{ company.org_number }}</p>
+    </div>
+
+    <div class="meeting-info">
+        <p><strong>Datum:</strong> {{ meeting.date|date_format if meeting.date else '____-__-__' }}</p>
+        <p><strong>Tid:</strong> {{ meeting.start_time|default('__:__') }}</p>
+        <p><strong>Plats:</strong> {{ meeting.location|default('________________________') }}</p>
+    </div>
+
+    <h2>Röstlängd</h2>
+    <table class="attendance-table">
+        <thead>
+            <tr>
+                <th>Aktieägare</th>
+                <th class="amount">Antal aktier</th>
+                <th class="amount">Antal röster</th>
+                <th>Ombud</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if shareholders %}
+            {% for shareholder in shareholders %}
+            <tr>
+                <td>{{ shareholder.name }}</td>
+                <td class="amount">{{ shareholder.shares }}</td>
+                <td class="amount">{{ shareholder.votes }}</td>
+                <td>{{ shareholder.proxy|default('-') }}</td>
+            </tr>
+            {% endfor %}
+            <tr style="font-weight: bold; background-color: #f0f0f0;">
+                <td>Summa</td>
+                <td class="amount">{{ total_shares }}</td>
+                <td class="amount">{{ total_votes }}</td>
+                <td></td>
+            </tr>
+            {% else %}
+            <tr>
+                <td>________________________</td>
+                <td class="amount">________</td>
+                <td class="amount">________</td>
+                <td>________</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <div class="section">
+        <p><span class="section-number">§ 1</span><span class="section-title">Stämmans öppnande</span></p>
+        <div class="section-content">
+            <p>{{ meeting.chairman|default('Styrelsens ordförande') }} öppnade stämman.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 2</span><span class="section-title">Val av ordförande vid stämman</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Till ordförande vid stämman valdes {{ meeting.chairman|default('________________________') }}.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 3</span><span class="section-title">Upprättande och godkännande av röstlängd</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Röstlängden enligt ovan godkändes.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 4</span><span class="section-title">Val av en eller två justerare</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Till justerare valdes {{ meeting.verifiers|default('________________________') }}.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 5</span><span class="section-title">Godkännande av dagordning</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Dagordningen godkändes.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 6</span><span class="section-title">Prövning av om stämman blivit behörigen sammankallad</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Stämman konstaterades vara behörigen sammankallad.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 7</span><span class="section-title">Framläggande av årsredovisning och revisionsberättelse</span></p>
+        <div class="section-content">
+            <p>Årsredovisning och revisionsberättelse för räkenskapsåret {{ fiscal_year.start_date|date_format if fiscal_year else '____-__-__' }} - {{ fiscal_year.end_date|date_format if fiscal_year else '____-__-__' }} föredrogs.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 8</span><span class="section-title">Fastställelse av resultat- och balansräkning</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Stämman fastställde resultaträkningen och balansräkningen.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 9</span><span class="section-title">Disposition av bolagets resultat</span></p>
+        <div class="section-content">
+            <p>Styrelsen har föreslagit följande resultatdisposition:</p>
+            <table class="attendance-table" style="width: auto;">
+                <tr>
+                    <td>Balanserat resultat</td>
+                    <td class="amount">{{ retained_earnings|currency if retained_earnings else '__________ kr' }}</td>
+                </tr>
+                <tr>
+                    <td>Årets resultat</td>
+                    <td class="amount">{{ result|currency if result else '__________ kr' }}</td>
+                </tr>
+                <tr style="font-weight: bold;">
+                    <td>Summa</td>
+                    <td class="amount">{{ (retained_earnings + result)|currency if retained_earnings and result else '__________ kr' }}</td>
+                </tr>
+            </table>
+            <p>Styrelsens förslag till disposition:</p>
+            <table class="attendance-table" style="width: auto;">
+                {% if proposed_dividend %}
+                <tr>
+                    <td>Utdelning ({{ dividend_per_share|currency }} per aktie)</td>
+                    <td class="amount">{{ proposed_dividend|currency }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td>Balanseras i ny räkning</td>
+                    <td class="amount">{{ carry_forward|currency if carry_forward else '__________ kr' }}</td>
+                </tr>
+            </table>
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Stämman beslutade i enlighet med styrelsens förslag.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 10</span><span class="section-title">Ansvarsfrihet för styrelseledamöter och verkställande direktör</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Stämman beviljade styrelseledamöterna och verkställande direktören ansvarsfrihet för räkenskapsåret.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 11</span><span class="section-title">Val av styrelse och revisor</span></p>
+        <div class="section-content">
+            <p>Till styrelseledamöter för tiden intill nästa årsstämma valdes:</p>
+            <ul>
+                {% if board_members %}
+                {% for member in board_members %}
+                <li>{{ member.name }} ({{ member.role }})</li>
+                {% endfor %}
+                {% else %}
+                <li>________________________ (ordförande)</li>
+                <li>________________________ (ledamot)</li>
+                {% endif %}
+            </ul>
+            {% if auditor %}
+            <p>Till revisor valdes: {{ auditor.name }} ({{ auditor.company|default('') }})</p>
+            {% else %}
+            <p>Till revisor valdes: ________________________</p>
+            {% endif %}
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Stämman godkände valen enligt ovan.
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <p><span class="section-number">§ 12</span><span class="section-title">Arvoden till styrelse och revisor</span></p>
+        <div class="section-content">
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> Styrelsearvode fastställdes till {{ board_fee|currency if board_fee else '__________ kr' }}. Arvode till revisor utgår enligt räkning.
+            </div>
+        </div>
+    </div>
+
+    {% if additional_items %}
+    {% for item in additional_items %}
+    <div class="section">
+        <p><span class="section-number">§ {{ loop.index + 12 }}</span><span class="section-title">{{ item.title }}</span></p>
+        <div class="section-content">
+            <p>{{ item.description|default('') }}</p>
+            {% if item.decision %}
+            <div class="decision">
+                <span class="decision-label">Beslut:</span> {{ item.decision }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    <div class="section">
+        <p><span class="section-number">§ {{ (additional_items|length if additional_items else 0) + 13 }}</span><span class="section-title">Stämmans avslutande</span></p>
+        <div class="section-content">
+            <p>Ordföranden tackade de närvarande och förklarade stämman avslutad.</p>
+        </div>
+    </div>
+
+    <div class="signature-section">
+        <p>Vid protokollet:</p>
+
+        <div class="signature-grid">
+            <div class="signature-block">
+                <div class="signature-line"></div>
+                <p class="signature-name">{{ meeting.secretary|default('Protokollförare') }}</p>
+            </div>
+        </div>
+
+        <p style="margin-top: 30px;">Justeras:</p>
+
+        <div class="signature-grid">
+            <div class="signature-block">
+                <div class="signature-line"></div>
+                <p class="signature-name">{{ meeting.chairman|default('Ordförande') }}</p>
+            </div>
+            <div class="signature-block">
+                <div class="signature-line"></div>
+                <p class="signature-name">{{ meeting.verifiers|default('Justerare') }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>{{ company.name }} | Org.nr: {{ company.org_number }}</p>
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Årsredovisning K3 - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            color: #000;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 20px;
+        }
+        .logo {
+            max-width: 150px;
+            max-height: 80px;
+            margin-bottom: 15px;
+        }
+        h1 {
+            font-size: 24pt;
+            margin: 10px 0;
+        }
+        h2 {
+            font-size: 14pt;
+            margin-top: 25px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        h3 {
+            font-size: 12pt;
+            margin-top: 15px;
+            margin-bottom: 8px;
+        }
+        h4 {
+            font-size: 11pt;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        .company-info {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        .amount {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+        .total-row {
+            font-weight: bold;
+            border-top: 2px solid #000;
+        }
+        .subtotal-row {
+            font-weight: bold;
+            background-color: #f9f9f9;
+        }
+        .indent {
+            padding-left: 25px;
+        }
+        .indent-2 {
+            padding-left: 50px;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .signature-section {
+            margin-top: 50px;
+            page-break-inside: avoid;
+        }
+        .signature-line {
+            border-bottom: 1px solid #000;
+            width: 250px;
+            display: inline-block;
+            margin-top: 40px;
+        }
+        .signature-block {
+            display: inline-block;
+            width: 45%;
+            margin-top: 30px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+            font-size: 9pt;
+            color: #666;
+        }
+        .note {
+            font-size: 10pt;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-left: 3px solid #333;
+        }
+        .toc {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #fafafa;
+        }
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .toc li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if logo_base64 %}
+        <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+        {% endif %}
+        <h1>Årsredovisning</h1>
+        <p><strong>enligt K3-regelverket</strong></p>
+    </div>
+
+    <div class="company-info">
+        <h2 style="border: none; text-align: center;">{{ company.name }}</h2>
+        <p>Organisationsnummer: {{ company.org_number }}</p>
+        <p>Räkenskapsår: {{ fiscal_year.start_date|date_format }} - {{ fiscal_year.end_date|date_format }}</p>
+        {% if company.address %}
+        <p>{{ company.address }}{% if company.postal_code %}, {{ company.postal_code }}{% endif %}{% if company.city %} {{ company.city }}{% endif %}</p>
+        {% endif %}
+    </div>
+
+    <div class="toc">
+        <h3>Innehåll</h3>
+        <ul>
+            <li>Förvaltningsberättelse</li>
+            <li>Resultaträkning</li>
+            <li>Balansräkning</li>
+            <li>Kassaflödesanalys</li>
+            <li>Noter</li>
+            <li>Underskrifter</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <h2>Förvaltningsberättelse</h2>
+
+    <h3>Allmänt om verksamheten</h3>
+    <p>{{ management_report.business_description|default('Bolaget bedriver verksamhet enligt bolagsordningen.') }}</p>
+
+    <h3>Väsentliga händelser under räkenskapsåret</h3>
+    <p>{{ management_report.significant_events|default('Inga väsentliga händelser har inträffat under räkenskapsåret.') }}</p>
+
+    <h3>Väsentliga händelser efter räkenskapsårets utgång</h3>
+    <p>{{ management_report.post_balance_events|default('Inga väsentliga händelser har inträffat efter räkenskapsårets utgång.') }}</p>
+
+    <h3>Förväntad framtida utveckling</h3>
+    <p>{{ management_report.future_outlook|default('Styrelsen bedömer att verksamheten kommer att utvecklas positivt.') }}</p>
+
+    <h3>Forskning och utveckling</h3>
+    <p>{{ management_report.research_development|default('Bolaget bedriver ingen forskning eller utveckling.') }}</p>
+
+    <h3>Flerårsöversikt</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date.year }}</th>
+                {% for year in previous_years %}
+                <th class="amount">{{ year.end_date.year }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Nettoomsättning (tkr)</td>
+                <td class="amount">{{ (income_statement.total_revenue / 1000)|round|int }}</td>
+                {% for data in previous_years_data %}
+                <td class="amount">{{ (data.total_revenue / 1000)|round|int }}</td>
+                {% endfor %}
+            </tr>
+            <tr>
+                <td>Resultat efter finansiella poster (tkr)</td>
+                <td class="amount">{{ (result / 1000)|round|int }}</td>
+                {% for data in previous_years_data %}
+                <td class="amount">{{ (data.result / 1000)|round|int }}</td>
+                {% endfor %}
+            </tr>
+            <tr>
+                <td>Balansomslutning (tkr)</td>
+                <td class="amount">{{ (balance_sheet.total_assets / 1000)|round|int }}</td>
+                {% for data in previous_years_data %}
+                <td class="amount">{{ (data.total_assets / 1000)|round|int }}</td>
+                {% endfor %}
+            </tr>
+            <tr>
+                <td>Soliditet (%)</td>
+                <td class="amount">{{ equity_ratio|round(1) }}</td>
+                {% for data in previous_years_data %}
+                <td class="amount">{{ data.equity_ratio|round(1) }}</td>
+                {% endfor %}
+            </tr>
+            <tr>
+                <td>Medelantal anställda</td>
+                <td class="amount">{{ notes.average_employees|default(0) }}</td>
+                {% for data in previous_years_data %}
+                <td class="amount">{{ data.average_employees|default(0) }}</td>
+                {% endfor %}
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Förslag till resultatdisposition</h3>
+    <p>Styrelsen föreslår att till förfogande stående medel:</p>
+    <table>
+        <tr>
+            <td>Överkursfond</td>
+            <td class="amount">{{ share_premium|default(0)|currency }}</td>
+        </tr>
+        <tr>
+            <td>Balanserat resultat</td>
+            <td class="amount">{{ retained_earnings|currency }}</td>
+        </tr>
+        <tr>
+            <td>Årets resultat</td>
+            <td class="amount">{{ result|currency }}</td>
+        </tr>
+        <tr class="total-row">
+            <td>Summa fritt eget kapital</td>
+            <td class="amount">{{ free_equity|currency }}</td>
+        </tr>
+    </table>
+    <p>disponeras enligt följande:</p>
+    <table>
+        {% if proposed_dividend %}
+        <tr>
+            <td>Utdelning till aktieägare ({{ dividend_per_share|currency }} per aktie)</td>
+            <td class="amount">{{ proposed_dividend|currency }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+            <td>Balanseras i ny räkning</td>
+            <td class="amount">{{ carry_forward|currency }}</td>
+        </tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Resultaträkning</h2>
+    <p class="note">Belopp i kronor om inget annat anges</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th>Not</th>
+                <th class="amount">{{ fiscal_year.end_date.year }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date.year }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="subtotal-row">
+                <td colspan="4">Rörelseintäkter</td>
+            </tr>
+            <tr>
+                <td class="indent">Nettoomsättning</td>
+                <td>2</td>
+                <td class="amount">{{ income_statement.net_sales|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.net_sales|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Övriga rörelseintäkter</td>
+                <td></td>
+                <td class="amount">{{ income_statement.other_revenue|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.other_revenue|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Summa rörelseintäkter</td>
+                <td></td>
+                <td class="amount">{{ income_statement.total_revenue|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.total_revenue|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="4">Rörelsekostnader</td>
+            </tr>
+            <tr>
+                <td class="indent">Råvaror och förnödenheter</td>
+                <td></td>
+                <td class="amount">{{ income_statement.raw_materials|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.raw_materials|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Övriga externa kostnader</td>
+                <td>3</td>
+                <td class="amount">{{ income_statement.external_costs|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.external_costs|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Personalkostnader</td>
+                <td>4</td>
+                <td class="amount">{{ income_statement.personnel_costs|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.personnel_costs|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Avskrivningar</td>
+                <td>5</td>
+                <td class="amount">{{ income_statement.depreciation|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.depreciation|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Summa rörelsekostnader</td>
+                <td></td>
+                <td class="amount">{{ income_statement.total_expenses|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.total_expenses|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td>Rörelseresultat</td>
+                <td></td>
+                <td class="amount">{{ operating_result|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_operating_result|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="4">Finansiella poster</td>
+            </tr>
+            <tr>
+                <td class="indent">Ränteintäkter och liknande resultatposter</td>
+                <td></td>
+                <td class="amount">{{ income_statement.financial_income|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.financial_income|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Räntekostnader och liknande resultatposter</td>
+                <td></td>
+                <td class="amount">{{ income_statement.financial_expenses|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.financial_expenses|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td>Resultat efter finansiella poster</td>
+                <td></td>
+                <td class="amount">{{ result_after_financial|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result_after_financial|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr>
+                <td>Skatt på årets resultat</td>
+                <td>6</td>
+                <td class="amount">{{ income_tax|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_tax|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr class="total-row">
+                <td>Årets resultat</td>
+                <td></td>
+                <td class="amount">{{ result|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Balansräkning</h2>
+    <p class="note">Belopp i kronor om inget annat anges</p>
+
+    <h3>Tillgångar</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th>Not</th>
+                <th class="amount">{{ fiscal_year.end_date|date_format }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date|date_format }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="subtotal-row">
+                <td colspan="4">Anläggningstillgångar</td>
+            </tr>
+
+            <tr>
+                <td class="indent"><em>Immateriella anläggningstillgångar</em></td>
+                <td></td>
+                <td></td>
+                {% if previous_year %}<td></td>{% endif %}
+            </tr>
+            {% for item in balance_sheet.intangible_assets %}
+            <tr>
+                <td class="indent-2">{{ item.account_name }}</td>
+                <td>7</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+
+            <tr>
+                <td class="indent"><em>Materiella anläggningstillgångar</em></td>
+                <td></td>
+                <td></td>
+                {% if previous_year %}<td></td>{% endif %}
+            </tr>
+            {% for item in balance_sheet.tangible_assets %}
+            <tr>
+                <td class="indent-2">{{ item.account_name }}</td>
+                <td>8</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+
+            <tr>
+                <td class="indent"><em>Finansiella anläggningstillgångar</em></td>
+                <td></td>
+                <td></td>
+                {% if previous_year %}<td></td>{% endif %}
+            </tr>
+            {% for item in balance_sheet.financial_assets %}
+            <tr>
+                <td class="indent-2">{{ item.account_name }}</td>
+                <td>9</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+
+            <tr class="subtotal-row">
+                <td>Summa anläggningstillgångar</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_fixed_assets|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_fixed_assets|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="4">Omsättningstillgångar</td>
+            </tr>
+            {% for item in balance_sheet.current_assets %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td></td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td>Summa omsättningstillgångar</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_current_assets|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_current_assets|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr class="total-row">
+                <td>Summa tillgångar</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_assets|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_assets|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Eget kapital och skulder</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th>Not</th>
+                <th class="amount">{{ fiscal_year.end_date|date_format }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date|date_format }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="subtotal-row">
+                <td colspan="4">Eget kapital</td>
+            </tr>
+            <tr>
+                <td class="indent">Aktiekapital</td>
+                <td>10</td>
+                <td class="amount">{{ balance_sheet.share_capital|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.share_capital|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Överkursfond</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.share_premium|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.share_premium|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Balanserat resultat</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.retained_earnings|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.retained_earnings|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Årets resultat</td>
+                <td></td>
+                <td class="amount">{{ result|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Summa eget kapital</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_equity|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_equity|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="4">Långfristiga skulder</td>
+            </tr>
+            {% for item in balance_sheet.long_term_liabilities %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td></td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+
+            <tr><td colspan="4">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="4">Kortfristiga skulder</td>
+            </tr>
+            {% for item in balance_sheet.short_term_liabilities %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td></td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td>Summa kortfristiga skulder</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_short_term|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_short_term|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr class="total-row">
+                <td>Summa eget kapital och skulder</td>
+                <td></td>
+                <td class="amount">{{ balance_sheet.total_liabilities|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_liabilities|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Kassaflödesanalys</h2>
+    <p class="note">Belopp i kronor om inget annat anges</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date.year }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date.year }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="subtotal-row">
+                <td colspan="3">Den löpande verksamheten</td>
+            </tr>
+            <tr>
+                <td>Resultat efter finansiella poster</td>
+                <td class="amount">{{ result_after_financial|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result_after_financial|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Justeringar för poster som inte ingår i kassaflödet</td>
+                <td class="amount">{{ cash_flow.non_cash_adjustments|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.non_cash_adjustments|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Betald skatt</td>
+                <td class="amount">{{ cash_flow.paid_tax|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.paid_tax|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Kassaflöde från den löpande verksamheten före förändringar av rörelsekapital</td>
+                <td class="amount">{{ cash_flow.operating_before_working_capital|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.operating_before_working_capital|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Förändring av rörelsefordringar</td>
+                <td class="amount">{{ cash_flow.change_receivables|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.change_receivables|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td class="indent">Förändring av rörelseskulder</td>
+                <td class="amount">{{ cash_flow.change_payables|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.change_payables|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Kassaflöde från den löpande verksamheten</td>
+                <td class="amount">{{ cash_flow.operating|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.operating|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="3">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="3">Investeringsverksamheten</td>
+            </tr>
+            <tr>
+                <td class="indent">Förvärv av materiella anläggningstillgångar</td>
+                <td class="amount">{{ cash_flow.capex|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.capex|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Kassaflöde från investeringsverksamheten</td>
+                <td class="amount">{{ cash_flow.investing|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.investing|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="3">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="3">Finansieringsverksamheten</td>
+            </tr>
+            <tr>
+                <td class="indent">Utbetald utdelning</td>
+                <td class="amount">{{ cash_flow.dividend_paid|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.dividend_paid|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="subtotal-row">
+                <td>Kassaflöde från finansieringsverksamheten</td>
+                <td class="amount">{{ cash_flow.financing|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.financing|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="3">&nbsp;</td></tr>
+
+            <tr class="total-row">
+                <td>Årets kassaflöde</td>
+                <td class="amount">{{ cash_flow.total|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.total|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td>Likvida medel vid årets början</td>
+                <td class="amount">{{ cash_flow.opening_cash|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.opening_cash|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr class="total-row">
+                <td>Likvida medel vid årets slut</td>
+                <td class="amount">{{ cash_flow.closing_cash|default(0)|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_cash_flow.closing_cash|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Noter</h2>
+
+    <h3>Not 1 - Redovisningsprinciper</h3>
+    <h4>Allmänna upplysningar</h4>
+    <p>Årsredovisningen är upprättad i enlighet med årsredovisningslagen och Bokföringsnämndens allmänna råd BFNAR 2012:1 Årsredovisning och koncernredovisning (K3).</p>
+
+    <h4>Intäktsredovisning</h4>
+    <p>Intäkter redovisas till det verkliga värdet av vad som erhållits eller kommer att erhållas. Intäkter redovisas i den omfattning det är sannolikt att de ekonomiska fördelarna kommer att tillgodogöras bolaget och intäkterna kan beräknas på ett tillförlitligt sätt.</p>
+
+    <h4>Materiella anläggningstillgångar</h4>
+    <p>Materiella anläggningstillgångar redovisas till anskaffningsvärde minskat med avskrivningar. Utgifter för förbättringar av tillgångars prestanda, utöver ursprunglig nivå, ökar tillgångarnas redovisade värde. Utgifter för reparation och underhåll redovisas som kostnader.</p>
+
+    <p>Avskrivningar sker linjärt över tillgångarnas beräknade nyttjandeperiod:</p>
+    <ul>
+        <li>Byggnader: 20-50 år</li>
+        <li>Inventarier: 5-10 år</li>
+        <li>Datorer: 3-5 år</li>
+        <li>Maskiner: 5-10 år</li>
+    </ul>
+
+    <h3>Not 2 - Nettoomsättningens fördelning</h3>
+    <table>
+        <tr>
+            <td>Sverige</td>
+            <td class="amount">{{ notes.revenue_sweden|default(income_statement.net_sales)|currency }}</td>
+        </tr>
+        {% if notes.revenue_eu %}
+        <tr>
+            <td>EU</td>
+            <td class="amount">{{ notes.revenue_eu|currency }}</td>
+        </tr>
+        {% endif %}
+        {% if notes.revenue_other %}
+        <tr>
+            <td>Övriga länder</td>
+            <td class="amount">{{ notes.revenue_other|currency }}</td>
+        </tr>
+        {% endif %}
+    </table>
+
+    <h3>Not 3 - Revisionsarvode</h3>
+    <table>
+        <tr>
+            <td>Revisionsuppdrag</td>
+            <td class="amount">{{ notes.audit_fee|default(0)|currency }}</td>
+        </tr>
+        <tr>
+            <td>Övriga tjänster</td>
+            <td class="amount">{{ notes.audit_other|default(0)|currency }}</td>
+        </tr>
+    </table>
+
+    <h3>Not 4 - Medelantal anställda, löner och andra ersättningar</h3>
+    <p>Medelantalet anställda: {{ notes.average_employees|default(0) }}</p>
+    <table>
+        <tr>
+            <td>Löner och ersättningar</td>
+            <td class="amount">{{ notes.salaries|default(0)|currency }}</td>
+        </tr>
+        <tr>
+            <td>Sociala kostnader</td>
+            <td class="amount">{{ notes.social_costs|default(0)|currency }}</td>
+        </tr>
+        <tr>
+            <td>Pensionskostnader</td>
+            <td class="amount">{{ notes.pension_costs|default(0)|currency }}</td>
+        </tr>
+    </table>
+
+    <h3>Not 5 - Avskrivningar</h3>
+    <table>
+        {% for item in notes.depreciation_details %}
+        <tr>
+            <td>{{ item.description }}</td>
+            <td class="amount">{{ item.amount|currency }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="total-row">
+            <td>Summa avskrivningar</td>
+            <td class="amount">{{ income_statement.depreciation|default(0)|currency }}</td>
+        </tr>
+    </table>
+
+    <h3>Not 6 - Skatt på årets resultat</h3>
+    <table>
+        <tr>
+            <td>Aktuell skatt</td>
+            <td class="amount">{{ notes.current_tax|default(0)|currency }}</td>
+        </tr>
+        <tr>
+            <td>Uppskjuten skatt</td>
+            <td class="amount">{{ notes.deferred_tax|default(0)|currency }}</td>
+        </tr>
+    </table>
+
+    <h3>Not 10 - Aktiekapital</h3>
+    <p>Aktiekapitalet utgörs av {{ notes.number_of_shares|default(0) }} aktier med kvotvärde {{ notes.quota_value|default(0)|currency }}.</p>
+
+    <div class="signature-section">
+        <h2>Underskrifter</h2>
+        <p>{{ company.city|default('Ort') }}, den ________________</p>
+
+        <p>Styrelsen:</p>
+        {% if board_members %}
+        {% for member in board_members %}
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>{{ member.name }}<br>{{ member.role }}</p>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>Styrelseledamot</p>
+        </div>
+        {% endif %}
+
+        <p style="margin-top: 30px;">Min revisionsberättelse har lämnats den ________________</p>
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>Revisor</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>

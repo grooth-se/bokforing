@@ -11,6 +11,8 @@ from app.models.asset import Asset, AssetDepreciation, AssetType, DepreciationMe
 from app.models.tax_declaration import TaxDeclaration
 from app.models.document import CompanyDocument, DocumentType, AnnualReport
 from app.models.shareholding import Shareholding, ShareholdingType, ShareholdingTransaction
+from app.models.accrual import Accrual, AccrualEntry, AccrualType, AccrualFrequency
+from app.models.template import TransactionTemplate, TemplateLineItem
 
 __all__ = [
     "Base",
@@ -34,4 +36,10 @@ __all__ = [
     "Shareholding",
     "ShareholdingType",
     "ShareholdingTransaction",
+    "Accrual",
+    "AccrualEntry",
+    "AccrualType",
+    "AccrualFrequency",
+    "TransactionTemplate",
+    "TemplateLineItem",
 ]

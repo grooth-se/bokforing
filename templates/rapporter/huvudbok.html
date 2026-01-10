@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Huvudbok - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1.5cm;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 9pt;
+            line-height: 1.3;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 15px;
+        }
+        .header {
+            border-bottom: 2px solid #2c5282;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .logo {
+            max-width: 100px;
+            max-height: 50px;
+        }
+        h1 {
+            color: #2c5282;
+            font-size: 16pt;
+            margin: 0;
+        }
+        h2 {
+            color: #2c5282;
+            font-size: 12pt;
+            margin: 20px 0 10px 0;
+            padding: 8px;
+            background-color: #edf2f7;
+            border-left: 4px solid #2c5282;
+        }
+        .company-name {
+            font-size: 12pt;
+            font-weight: bold;
+            margin: 3px 0;
+        }
+        .period {
+            color: #666;
+            font-size: 9pt;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 5px 0 20px 0;
+            font-size: 8pt;
+        }
+        th, td {
+            padding: 4px 6px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #f7fafc;
+            font-weight: bold;
+            color: #4a5568;
+        }
+        .amount {
+            text-align: right;
+            font-family: 'Consolas', monospace;
+        }
+        .date-col {
+            width: 70px;
+        }
+        .voucher-col {
+            width: 60px;
+        }
+        .description-col {
+            width: 200px;
+        }
+        .balance-row {
+            font-weight: bold;
+            background-color: #e2e8f0;
+        }
+        .opening-balance {
+            font-style: italic;
+            background-color: #f0fff4;
+        }
+        .closing-balance {
+            font-weight: bold;
+            background-color: #ebf8ff;
+            border-top: 2px solid #2c5282;
+        }
+        .account-summary {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            background-color: #f7fafc;
+            margin-bottom: 5px;
+            font-size: 8pt;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 8pt;
+            color: #718096;
+            text-align: center;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .debit {
+            color: #2f855a;
+        }
+        .credit {
+            color: #c53030;
+        }
+        .no-transactions {
+            font-style: italic;
+            color: #718096;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <h1>Huvudbok</h1>
+                <p class="company-name">{{ company.name }}</p>
+                <p class="period">
+                    Org.nr: {{ company.org_number }}<br>
+                    Period: {{ fiscal_year.start_date|date_format }} - {{ fiscal_year.end_date|date_format }}
+                </p>
+            </div>
+            {% if logo_base64 %}
+            <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+            {% endif %}
+        </div>
+    </div>
+
+    {% for account in accounts %}
+    {% if not loop.first and loop.index0 % 3 == 0 %}
+    <div class="page-break"></div>
+    {% endif %}
+
+    <h2>{{ account.number }} - {{ account.name }}</h2>
+
+    <div class="account-summary">
+        <span>IB: {{ account.opening_balance|currency }}</span>
+        <span>Debet: {{ account.total_debit|currency }}</span>
+        <span>Kredit: {{ account.total_credit|currency }}</span>
+        <span>UB: {{ account.closing_balance|currency }}</span>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th class="date-col">Datum</th>
+                <th class="voucher-col">Ver.nr</th>
+                <th class="description-col">Beskrivning</th>
+                <th class="amount">Debet</th>
+                <th class="amount">Kredit</th>
+                <th class="amount">Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="opening-balance">
+                <td>{{ fiscal_year.start_date|date_format }}</td>
+                <td></td>
+                <td>Ingående balans</td>
+                <td class="amount"></td>
+                <td class="amount"></td>
+                <td class="amount">{{ account.opening_balance|currency }}</td>
+            </tr>
+
+            {% if account.transactions %}
+            {% for tx in account.transactions %}
+            <tr>
+                <td class="date-col">{{ tx.date|date_format }}</td>
+                <td class="voucher-col">{{ tx.voucher_number }}</td>
+                <td class="description-col">{{ tx.description|truncate(40) }}</td>
+                <td class="amount {% if tx.debit %}debit{% endif %}">
+                    {{ tx.debit|currency if tx.debit else '' }}
+                </td>
+                <td class="amount {% if tx.credit %}credit{% endif %}">
+                    {{ tx.credit|currency if tx.credit else '' }}
+                </td>
+                <td class="amount">{{ tx.running_balance|currency }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="6" class="no-transactions">Inga transaktioner under perioden</td>
+            </tr>
+            {% endif %}
+
+            <tr class="closing-balance">
+                <td>{{ fiscal_year.end_date|date_format }}</td>
+                <td></td>
+                <td>Utgående balans</td>
+                <td class="amount">{{ account.total_debit|currency }}</td>
+                <td class="amount">{{ account.total_credit|currency }}</td>
+                <td class="amount">{{ account.closing_balance|currency }}</td>
+            </tr>
+        </tbody>
+    </table>
+    {% endfor %}
+
+    <div class="footer">
+        <p>{{ company.name }} | Org.nr: {{ company.org_number }}</p>
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+        <p>Antal konton: {{ accounts|length }}</p>
+    </div>
+</body>
+</html>

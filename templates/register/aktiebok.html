@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aktiebok - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #000;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 3px double #000;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .logo {
+            max-width: 120px;
+            max-height: 60px;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 24pt;
+            margin: 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        h2 {
+            font-size: 14pt;
+            margin: 25px 0 15px 0;
+            border-bottom: 1px solid #000;
+            padding-bottom: 5px;
+        }
+        h3 {
+            font-size: 12pt;
+            margin: 20px 0 10px 0;
+        }
+        .company-info {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .company-info p {
+            margin: 3px 0;
+        }
+        .company-name {
+            font-size: 16pt;
+            font-weight: bold;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 8px 10px;
+            text-align: left;
+            border: 1px solid #000;
+        }
+        th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        .amount {
+            text-align: right;
+        }
+        .center {
+            text-align: center;
+        }
+        .total-row {
+            font-weight: bold;
+            background-color: #f5f5f5;
+        }
+        .summary-box {
+            border: 2px solid #000;
+            padding: 15px;
+            margin: 20px 0;
+            background-color: #fafafa;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .summary-item {
+            padding: 5px 0;
+        }
+        .summary-label {
+            font-weight: bold;
+        }
+        .shareholder-section {
+            margin: 30px 0;
+            page-break-inside: avoid;
+        }
+        .shareholder-header {
+            background-color: #e8e8e8;
+            padding: 10px;
+            border: 1px solid #000;
+            border-bottom: none;
+        }
+        .shareholder-name {
+            font-size: 13pt;
+            font-weight: bold;
+        }
+        .shareholder-details {
+            font-size: 10pt;
+            color: #444;
+        }
+        .transaction-table {
+            font-size: 9pt;
+        }
+        .transaction-table th,
+        .transaction-table td {
+            padding: 5px 8px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 15px;
+            border-top: 1px solid #ccc;
+            font-size: 9pt;
+            color: #666;
+        }
+        .signature-section {
+            margin-top: 50px;
+            page-break-inside: avoid;
+        }
+        .signature-line {
+            border-bottom: 1px solid #000;
+            width: 250px;
+            margin-top: 40px;
+            display: inline-block;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .note {
+            font-size: 10pt;
+            font-style: italic;
+            color: #666;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if logo_base64 %}
+        <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+        {% endif %}
+        <h1>Aktiebok</h1>
+    </div>
+
+    <div class="company-info">
+        <p class="company-name">{{ company.name }}</p>
+        <p>Organisationsnummer: {{ company.org_number }}</p>
+        {% if company.address %}
+        <p>{{ company.address }}{% if company.postal_code %}, {{ company.postal_code }}{% endif %}{% if company.city %} {{ company.city }}{% endif %}</p>
+        {% endif %}
+    </div>
+
+    <div class="summary-box">
+        <h3 style="margin-top: 0;">Sammanfattning aktiekapital</h3>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <span class="summary-label">Aktiekapital:</span><br>
+                {{ share_capital.total|currency }}
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">Antal aktier:</span><br>
+                {{ share_capital.total_shares|default(0) }} st
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">Kvotvärde:</span><br>
+                {{ share_capital.quota_value|currency }}
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">Antal aktieägare:</span><br>
+                {{ shareholders|length }} st
+            </div>
+        </div>
+        {% if share_capital.share_classes %}
+        <h4>Aktieslag</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th>Aktieslag</th>
+                    <th class="amount">Antal</th>
+                    <th class="amount">Röster/aktie</th>
+                    <th class="amount">Totalt röster</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for share_class in share_capital.share_classes %}
+                <tr>
+                    <td>{{ share_class.name }}</td>
+                    <td class="amount">{{ share_class.count }}</td>
+                    <td class="amount">{{ share_class.votes_per_share }}</td>
+                    <td class="amount">{{ share_class.total_votes }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    <h2>Aktieägare</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Nr</th>
+                <th>Aktieägare</th>
+                <th>Person-/Org.nr</th>
+                <th class="amount">Antal aktier</th>
+                <th class="amount">Andel %</th>
+                <th class="amount">Röster %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for shareholder in shareholders %}
+            <tr>
+                <td class="center">{{ loop.index }}</td>
+                <td>{{ shareholder.name }}</td>
+                <td>{{ shareholder.id_number|default('-') }}</td>
+                <td class="amount">{{ shareholder.shares }}</td>
+                <td class="amount">{{ shareholder.ownership_percent|round(2) }}%</td>
+                <td class="amount">{{ shareholder.voting_percent|round(2) }}%</td>
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+                <td colspan="3">Totalt</td>
+                <td class="amount">{{ share_capital.total_shares }}</td>
+                <td class="amount">100,00%</td>
+                <td class="amount">100,00%</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Detaljerad aktiebok per ägare</h2>
+
+    {% for shareholder in shareholders %}
+    <div class="shareholder-section">
+        <div class="shareholder-header">
+            <div class="shareholder-name">{{ shareholder.name }}</div>
+            <div class="shareholder-details">
+                {% if shareholder.id_number %}Person-/Org.nr: {{ shareholder.id_number }}<br>{% endif %}
+                {% if shareholder.address %}Adress: {{ shareholder.address }}<br>{% endif %}
+                {% if shareholder.email %}E-post: {{ shareholder.email }}<br>{% endif %}
+                {% if shareholder.phone %}Telefon: {{ shareholder.phone }}{% endif %}
+            </div>
+        </div>
+
+        <table class="transaction-table">
+            <thead>
+                <tr>
+                    <th>Datum</th>
+                    <th>Händelse</th>
+                    <th>Aktienummer</th>
+                    <th class="amount">Antal</th>
+                    <th class="amount">Pris/aktie</th>
+                    <th class="amount">Totalt innehav</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in shareholder.transactions %}
+                <tr>
+                    <td>{{ tx.date|date_format }}</td>
+                    <td>{{ tx.type }}</td>
+                    <td>{{ tx.share_numbers|default('-') }}</td>
+                    <td class="amount">{{ '+' if tx.is_acquisition else '-' }}{{ tx.count }}</td>
+                    <td class="amount">{{ tx.price_per_share|currency if tx.price_per_share else '-' }}</td>
+                    <td class="amount">{{ tx.running_total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p><strong>Nuvarande innehav:</strong> {{ shareholder.shares }} aktier ({{ shareholder.ownership_percent|round(2) }}%)</p>
+    </div>
+    {% endfor %}
+
+    <div class="signature-section">
+        <h2>Intygande</h2>
+        <p>Undertecknad intygar att denna aktiebok är upprättad i enlighet med aktiebolagslagen (2005:551) och överensstämmer med bolagets faktiska ägarförhållanden.</p>
+
+        <p>{{ company.city|default('Ort') }}, den ________________</p>
+
+        <div class="signature-line"></div>
+        <p>Styrelseledamot/VD</p>
+
+        <p class="note">
+            Enligt aktiebolagslagen ska aktieboken hållas tillgänglig hos bolaget.
+            Ändringar ska föras in utan dröjsmål.
+        </p>
+    </div>
+
+    <div class="footer">
+        <p>{{ company.name }} | Org.nr: {{ company.org_number }}</p>
+        <p>Aktiebok genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>

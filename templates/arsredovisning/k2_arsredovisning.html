@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Årsredovisning - {{ company.name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            color: #000;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 20px;
+        }
+        .logo {
+            max-width: 150px;
+            max-height: 80px;
+            margin-bottom: 15px;
+        }
+        h1 {
+            font-size: 24pt;
+            margin: 10px 0;
+        }
+        h2 {
+            font-size: 14pt;
+            margin-top: 25px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        h3 {
+            font-size: 12pt;
+            margin-top: 15px;
+            margin-bottom: 8px;
+        }
+        .company-info {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .company-info p {
+            margin: 3px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        .amount {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+        .total-row {
+            font-weight: bold;
+            border-top: 2px solid #000;
+        }
+        .subtotal-row {
+            font-weight: bold;
+            background-color: #f9f9f9;
+        }
+        .indent {
+            padding-left: 25px;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .signature-section {
+            margin-top: 50px;
+            page-break-inside: avoid;
+        }
+        .signature-line {
+            border-bottom: 1px solid #000;
+            width: 250px;
+            display: inline-block;
+            margin-top: 40px;
+        }
+        .signature-block {
+            display: inline-block;
+            width: 45%;
+            margin-top: 30px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+            font-size: 9pt;
+            color: #666;
+        }
+        .note {
+            font-size: 10pt;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-left: 3px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if logo_base64 %}
+        <img src="{{ logo_base64 }}" alt="Logotyp" class="logo">
+        {% endif %}
+        <h1>Årsredovisning</h1>
+        <p><strong>enligt K2-regelverket</strong></p>
+    </div>
+
+    <div class="company-info">
+        <h2 style="border: none; text-align: center;">{{ company.name }}</h2>
+        <p>Organisationsnummer: {{ company.org_number }}</p>
+        <p>Räkenskapsår: {{ fiscal_year.start_date|date_format }} - {{ fiscal_year.end_date|date_format }}</p>
+        {% if company.address %}
+        <p>{{ company.address }}{% if company.postal_code %}, {{ company.postal_code }}{% endif %}{% if company.city %} {{ company.city }}{% endif %}</p>
+        {% endif %}
+    </div>
+
+    <h2>Förvaltningsberättelse</h2>
+
+    <h3>Verksamheten</h3>
+    <p>{{ management_report.business_description|default('Bolaget bedriver verksamhet enligt bolagsordningen.') }}</p>
+
+    <h3>Väsentliga händelser under räkenskapsåret</h3>
+    <p>{{ management_report.significant_events|default('Inga väsentliga händelser har inträffat under räkenskapsåret.') }}</p>
+
+    <h3>Flerårsöversikt</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date.year }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date.year }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Nettoomsättning</td>
+                <td class="amount">{{ income_statement.total_revenue|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.total_revenue|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td>Resultat efter finansiella poster</td>
+                <td class="amount">{{ result|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result|currency }}</td>
+                {% endif %}
+            </tr>
+            <tr>
+                <td>Balansomslutning</td>
+                <td class="amount">{{ balance_sheet.total_assets|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_assets|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Förslag till resultatdisposition</h3>
+    <p>Styrelsen föreslår att till förfogande stående medel:</p>
+    <table>
+        <tr>
+            <td>Balanserat resultat</td>
+            <td class="amount">{{ retained_earnings|currency }}</td>
+        </tr>
+        <tr>
+            <td>Årets resultat</td>
+            <td class="amount">{{ result|currency }}</td>
+        </tr>
+        <tr class="total-row">
+            <td>Summa</td>
+            <td class="amount">{{ (retained_earnings + result)|currency }}</td>
+        </tr>
+    </table>
+    <p>disponeras enligt följande:</p>
+    <table>
+        {% if proposed_dividend %}
+        <tr>
+            <td>Utdelning till aktieägare</td>
+            <td class="amount">{{ proposed_dividend|currency }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+            <td>Balanseras i ny räkning</td>
+            <td class="amount">{{ (retained_earnings + result - (proposed_dividend|default(0)))|currency }}</td>
+        </tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Resultaträkning</h2>
+    <p class="note">Belopp i kronor</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date.year }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date.year }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="subtotal-row">
+                <td colspan="3">Rörelseintäkter</td>
+            </tr>
+            {% for item in income_statement.revenue %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td>Summa rörelseintäkter</td>
+                <td class="amount">{{ income_statement.total_revenue|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.total_revenue|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="3">&nbsp;</td></tr>
+
+            <tr class="subtotal-row">
+                <td colspan="3">Rörelsekostnader</td>
+            </tr>
+            {% for item in income_statement.expenses %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="subtotal-row">
+                <td>Summa rörelsekostnader</td>
+                <td class="amount">{{ income_statement.total_expenses|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_income_statement.total_expenses|currency }}</td>
+                {% endif %}
+            </tr>
+
+            <tr><td colspan="3">&nbsp;</td></tr>
+
+            <tr class="total-row">
+                <td>Årets resultat</td>
+                <td class="amount">{{ result|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_result|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Balansräkning</h2>
+    <p class="note">Belopp i kronor</p>
+
+    <h3>Tillgångar</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date|date_format }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date|date_format }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for group, items in balance_sheet.assets|groupby('group') %}
+            <tr class="subtotal-row">
+                <td colspan="3">{{ group }}</td>
+            </tr>
+            {% for item in items %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            {% endfor %}
+            <tr class="total-row">
+                <td>Summa tillgångar</td>
+                <td class="amount">{{ balance_sheet.total_assets|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_assets|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Eget kapital och skulder</h3>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="amount">{{ fiscal_year.end_date|date_format }}</th>
+                {% if previous_year %}
+                <th class="amount">{{ previous_year.end_date|date_format }}</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for group, items in balance_sheet.liabilities|groupby('group') %}
+            <tr class="subtotal-row">
+                <td colspan="3">{{ group }}</td>
+            </tr>
+            {% for item in items %}
+            <tr>
+                <td class="indent">{{ item.account_name }}</td>
+                <td class="amount">{{ item.balance|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ item.previous_balance|default(0)|currency }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            {% endfor %}
+            <tr class="total-row">
+                <td>Summa eget kapital och skulder</td>
+                <td class="amount">{{ balance_sheet.total_liabilities|currency }}</td>
+                {% if previous_year %}
+                <td class="amount">{{ previous_balance_sheet.total_liabilities|currency }}</td>
+                {% endif %}
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2>Noter</h2>
+
+    <h3>Not 1 - Redovisningsprinciper</h3>
+    <p>Årsredovisningen har upprättats enligt årsredovisningslagen och Bokföringsnämndens allmänna råd BFNAR 2016:10 Årsredovisning i mindre företag (K2).</p>
+
+    <h3>Not 2 - Medelantalet anställda</h3>
+    <p>Medelantalet anställda under räkenskapsåret: {{ notes.average_employees|default(0) }}</p>
+
+    {% if notes.additional_notes %}
+    {% for note in notes.additional_notes %}
+    <h3>Not {{ loop.index + 2 }} - {{ note.title }}</h3>
+    <p>{{ note.content }}</p>
+    {% endfor %}
+    {% endif %}
+
+    <div class="signature-section">
+        <h2>Underskrifter</h2>
+        <p>{{ company.city|default('Ort') }}, den ________________</p>
+
+        <p>Styrelsen:</p>
+        {% if board_members %}
+        {% for member in board_members %}
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>{{ member.name }}<br>{{ member.role }}</p>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>Styrelseledamot</p>
+        </div>
+        {% endif %}
+
+        <p style="margin-top: 30px;">Min revisionsberättelse har lämnats den ________________</p>
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <p>Revisor</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Genererad: {{ generated_at|date_format('%Y-%m-%d %H:%M') }}</p>
+    </div>
+</body>
+</html>
