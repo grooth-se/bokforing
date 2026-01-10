@@ -91,6 +91,30 @@ def main():
                 else:
                     st.error("Fyll i alla fält")
 
+    # Ta bort företag
+    if companies and st.session_state.selected_company_id:
+        with st.sidebar.expander("🗑️ Ta bort företag"):
+            current_company = service.get_company(st.session_state.selected_company_id)
+            if current_company:
+                st.warning(f"⚠️ Du är på väg att ta bort **{current_company.name}**")
+                st.caption("Detta tar bort ALL data: konton, transaktioner, räkenskapsår.")
+
+                confirm_name = st.text_input(
+                    "Skriv företagsnamnet för att bekräfta",
+                    key="delete_confirm"
+                )
+
+                if st.button("🗑️ Ta bort företag permanent", type="primary"):
+                    if confirm_name == current_company.name:
+                        if service.delete_company(current_company.id):
+                            st.success(f"Företaget '{current_company.name}' har tagits bort!")
+                            st.session_state.selected_company_id = None
+                            st.rerun()
+                        else:
+                            st.error("Kunde inte ta bort företaget")
+                    else:
+                        st.error("Företagsnamnet stämmer inte")
+
     # Sidinnehåll
     if page == "Dashboard":
         show_dashboard(service)

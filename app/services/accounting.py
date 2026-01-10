@@ -56,6 +56,55 @@ class AccountingService:
         """Hämta alla företag"""
         return self.db.query(Company).all()
 
+    def delete_company(self, company_id: int) -> bool:
+        """
+        Ta bort ett företag och all dess data
+
+        Tar bort i ordning:
+        1. Transaktionsrader
+        2. Transaktioner
+        3. Konton
+        4. Räkenskapsår
+        5. Företaget
+
+        Returns:
+            True om företaget togs bort, False om det inte hittades
+        """
+        company = self.get_company(company_id)
+        if not company:
+            return False
+
+        # Ta bort transaktionsrader (via transaktioner)
+        transactions = self.db.query(Transaction).filter(
+            Transaction.company_id == company_id
+        ).all()
+
+        for tx in transactions:
+            self.db.query(TransactionLine).filter(
+                TransactionLine.transaction_id == tx.id
+            ).delete()
+
+        # Ta bort transaktioner
+        self.db.query(Transaction).filter(
+            Transaction.company_id == company_id
+        ).delete()
+
+        # Ta bort konton
+        self.db.query(Account).filter(
+            Account.company_id == company_id
+        ).delete()
+
+        # Ta bort räkenskapsår
+        self.db.query(FiscalYear).filter(
+            FiscalYear.company_id == company_id
+        ).delete()
+
+        # Ta bort företaget
+        self.db.delete(company)
+        self.db.commit()
+
+        return True
+
     # === KONTOPLAN ===
 
     def load_bas_accounts(self, company_id: int) -> list[Account]:
