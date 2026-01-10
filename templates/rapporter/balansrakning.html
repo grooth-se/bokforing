@@ -132,7 +132,8 @@
                 <p class="company-name">{{ company.name }}</p>
                 <p class="period">
                     Org.nr: {{ company.org_number }}<br>
-                    Per: {{ fiscal_year.end_date|date_format }}
+                    Räkenskapsår: {{ fiscal_year.start_date|date_format }} - {{ fiscal_year.end_date|date_format }}<br>
+                    Per balansdagen: {{ fiscal_year.end_date|date_format }}
                 </p>
             </div>
             {% if logo_base64 %}

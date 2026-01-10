@@ -389,6 +389,8 @@ class ReportGenerator:
             return template.render(
                 company=company,
                 fiscal_year=fiscal_year,
+                generated_at=datetime.now(),
+                show_previous=False,
                 **financial_data
             )
 
@@ -417,6 +419,8 @@ class ReportGenerator:
             return template.render(
                 company=company,
                 fiscal_year=fiscal_year,
+                generated_at=datetime.now(),
+                show_previous=False,
                 **financial_data
             )
 
@@ -598,6 +602,11 @@ Denna mapp innehåller Jinja2-mallar för generering av rapporter och dokument.
 
         Returns:
             PDF som bytes
+
+        Note:
+            Kräver WeasyPrint med systembibliotek.
+            macOS: brew install pango
+            Ubuntu: apt install libpango-1.0-0 libpangocairo-1.0-0
         """
         try:
             from weasyprint import HTML
@@ -605,6 +614,15 @@ Denna mapp innehåller Jinja2-mallar för generering av rapporter och dokument.
             return pdf_bytes
         except ImportError:
             raise RuntimeError("WeasyPrint är inte installerat. Kör: pip install weasyprint")
+        except OSError as e:
+            if 'pango' in str(e).lower():
+                raise RuntimeError(
+                    "PDF-generering kräver systembibliotek.\n"
+                    "macOS: Installera Homebrew och kör 'brew install pango'\n"
+                    "Ubuntu/Debian: sudo apt install libpango-1.0-0 libpangocairo-1.0-0\n"
+                    "Använd HTML-export som alternativ."
+                )
+            raise RuntimeError(f"Kunde inte generera PDF: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Kunde inte generera PDF: {str(e)}")
 
