@@ -746,42 +746,78 @@ def show_sie_import(db):
             )
 
             if import_option == "Skapa nytt företag från SIE-filen":
+                # Analysera transaktionsdatum för att föreslå räkenskapsår
+                from datetime import date as date_type
+
+                transaction_dates = [tx.date for tx in data.transactions if tx.date]
+
+                if transaction_dates:
+                    min_date = min(transaction_dates)
+                    max_date = max(transaction_dates)
+
+                    # Föreslå räkenskapsår baserat på transaktioner
+                    suggested_start = date_type(min_date.year, 1, 1)
+                    suggested_end = date_type(min_date.year, 12, 31)
+
+                    st.info(f"""
+                    **Analys av transaktioner:**
+                    - Antal transaktioner: {len(data.transactions)}
+                    - Tidigaste transaktion: {min_date}
+                    - Senaste transaktion: {max_date}
+                    - **Föreslaget räkenskapsår: {suggested_start} - {suggested_end}**
+                    """)
+                else:
+                    suggested_start = data.fiscal_year_start or date_type(date_type.today().year, 1, 1)
+                    suggested_end = data.fiscal_year_end or date_type(date_type.today().year, 12, 31)
+
+                # Om SIE-filen har räkenskapsår, visa det också
+                if data.fiscal_year_start and data.fiscal_year_end:
+                    if data.fiscal_year_start != suggested_start or data.fiscal_year_end != suggested_end:
+                        st.write(f"*Räkenskapsår från filen: {data.fiscal_year_start} - {data.fiscal_year_end}*")
+
+                st.divider()
+
+                # Bekräftelsefråga
+                st.subheader("Vill du skapa detta företag?")
+
                 with st.form("new_company_import"):
-                    st.write("**Justera företagsinformation:**")
+                    st.write("**Företagsinformation:**")
 
-                    company_name = st.text_input(
-                        "Företagsnamn",
-                        value=data.company_name or "Nytt företag"
-                    )
-
-                    org_number = st.text_input(
-                        "Organisationsnummer",
-                        value=data.org_number or "000000-0000"
-                    )
-
-                    accounting_standard = st.selectbox(
-                        "Redovisningsstandard",
-                        ["K2", "K3"],
-                        index=0
-                    )
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        company_name = st.text_input(
+                            "Företagsnamn",
+                            value=data.company_name or "Nytt företag"
+                        )
+                        accounting_standard = st.selectbox(
+                            "Redovisningsstandard",
+                            ["K2", "K3"],
+                            index=0,
+                            help="K2 för mindre företag, K3 för större"
+                        )
+                    with col2:
+                        org_number = st.text_input(
+                            "Organisationsnummer",
+                            value=data.org_number or "000000-0000"
+                        )
 
                     st.write("**Räkenskapsår:**")
-                    from datetime import date as date_type
 
-                    if data.fiscal_year_start and data.fiscal_year_end:
-                        default_start = data.fiscal_year_start
-                        default_end = data.fiscal_year_end
-                    else:
-                        default_start = date_type(date_type.today().year, 1, 1)
-                        default_end = date_type(date_type.today().year, 12, 31)
-
+                    # Använd föreslaget räkenskapsår som standard
                     col_start, col_end = st.columns(2)
                     with col_start:
-                        fy_start = st.date_input("Startdatum", value=default_start)
+                        fy_start = st.date_input("Startdatum", value=suggested_start)
                     with col_end:
-                        fy_end = st.date_input("Slutdatum", value=default_end)
+                        fy_end = st.date_input("Slutdatum", value=suggested_end)
 
-                    if st.form_submit_button("Importera och skapa företag", type="primary"):
+                    st.divider()
+
+                    st.write("**Sammanfattning av import:**")
+                    st.write(f"- {len(data.accounts)} konton kommer importeras")
+                    st.write(f"- {len(data.opening_balances)} ingående balanser")
+                    st.write(f"- {len(data.transactions)} transaktioner")
+
+                    if st.form_submit_button("✓ Ja, skapa företag och importera", type="primary"):
                         try:
                             # Skapa företag manuellt
                             company = service.create_company(
