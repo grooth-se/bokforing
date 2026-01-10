@@ -1543,6 +1543,12 @@ def show_balance_sheet(service: AccountingService, company_id: int):
     """Visa balansräkning"""
     st.subheader("Balansräkning")
 
+    # Visa räkenskapsår
+    fiscal_year = service.get_active_fiscal_year(company_id)
+    if fiscal_year:
+        st.caption(f"Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}")
+        st.caption(f"Per balansdagen: {fiscal_year.end_date}")
+
     accounts = service.get_accounts(company_id)
 
     # Tillgångar (klass 1)
@@ -1573,6 +1579,11 @@ def show_balance_sheet(service: AccountingService, company_id: int):
 def show_income_statement(service: AccountingService, company_id: int):
     """Visa resultaträkning"""
     st.subheader("Resultaträkning")
+
+    # Visa räkenskapsår
+    fiscal_year = service.get_active_fiscal_year(company_id)
+    if fiscal_year:
+        st.caption(f"Räkenskapsår: {fiscal_year.start_date} - {fiscal_year.end_date}")
 
     accounts = service.get_accounts(company_id)
 

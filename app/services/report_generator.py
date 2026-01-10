@@ -597,34 +597,91 @@ Denna mapp innehåller Jinja2-mallar för generering av rapporter och dokument.
         """
         Konvertera HTML till PDF
 
-        Args:
-            html_content: HTML-sträng
-
-        Returns:
-            PDF som bytes
-
-        Note:
-            Kräver WeasyPrint med systembibliotek.
-            macOS: brew install pango
-            Ubuntu: apt install libpango-1.0-0 libpangocairo-1.0-0
+        Försöker först WeasyPrint, sedan ReportLab som fallback.
         """
+        # Försök WeasyPrint först
         try:
             from weasyprint import HTML
             pdf_bytes = HTML(string=html_content, base_url=str(self.TEMPLATE_DIR)).write_pdf()
             return pdf_bytes
-        except ImportError:
-            raise RuntimeError("WeasyPrint är inte installerat. Kör: pip install weasyprint")
-        except OSError as e:
-            if 'pango' in str(e).lower():
-                raise RuntimeError(
-                    "PDF-generering kräver systembibliotek.\n"
-                    "macOS: Installera Homebrew och kör 'brew install pango'\n"
-                    "Ubuntu/Debian: sudo apt install libpango-1.0-0 libpangocairo-1.0-0\n"
-                    "Använd HTML-export som alternativ."
-                )
-            raise RuntimeError(f"Kunde inte generera PDF: {str(e)}")
+        except (ImportError, OSError):
+            pass  # Fallback till ReportLab
+
+        # Fallback: Använd ReportLab för enkel PDF
+        try:
+            return self._generate_pdf_with_reportlab(html_content)
         except Exception as e:
             raise RuntimeError(f"Kunde inte generera PDF: {str(e)}")
+
+    def _generate_pdf_with_reportlab(self, html_content: str) -> bytes:
+        """Generera PDF med ReportLab från HTML-innehåll"""
+        import io
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            raise RuntimeError("BeautifulSoup krävs. Kör: pip install beautifulsoup4")
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='Swedish', fontName='Helvetica', fontSize=10, leading=14))
+        styles.add(ParagraphStyle(name='SwedishTitle', fontName='Helvetica-Bold', fontSize=16, leading=20))
+        styles.add(ParagraphStyle(name='SwedishHeading', fontName='Helvetica-Bold', fontSize=12, leading=16))
+
+        story = []
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Extrahera rubriker och text
+        for element in soup.find_all(['h1', 'h2', 'h3', 'p', 'table']):
+            if element.name == 'h1':
+                story.append(Paragraph(element.get_text(strip=True), styles['SwedishTitle']))
+                story.append(Spacer(1, 0.5*cm))
+            elif element.name in ['h2', 'h3']:
+                story.append(Spacer(1, 0.3*cm))
+                story.append(Paragraph(element.get_text(strip=True), styles['SwedishHeading']))
+                story.append(Spacer(1, 0.2*cm))
+            elif element.name == 'p':
+                text = element.get_text(strip=True)
+                if text:
+                    story.append(Paragraph(text, styles['Swedish']))
+                    story.append(Spacer(1, 0.2*cm))
+            elif element.name == 'table':
+                # Konvertera tabell
+                table_data = []
+                for row in element.find_all('tr'):
+                    row_data = []
+                    for cell in row.find_all(['th', 'td']):
+                        row_data.append(cell.get_text(strip=True))
+                    if row_data:
+                        table_data.append(row_data)
+
+                if table_data:
+                    # Skapa tabell med stil
+                    t = Table(table_data)
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 9),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ]))
+                    story.append(t)
+                    story.append(Spacer(1, 0.3*cm))
+
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.read()
 
     def to_docx(self, html_content: str, title: str = "Rapport") -> bytes:
         """
