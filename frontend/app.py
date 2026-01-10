@@ -601,31 +601,131 @@ def show_accounts(service: AccountingService):
             st.rerun()
         return
 
-    # Gruppera per kontoklass
-    classes = {}
-    for acc in accounts:
-        cls = acc.account_class
-        if cls not in classes:
-            classes[cls] = []
-        classes[cls].append(acc)
+    # Flikar för kontoplan och ingående balanser
+    tab1, tab2 = st.tabs(["Kontoplan", "Ingående balanser"])
 
-    class_names = {
-        1: "Tillgångar",
-        2: "Eget kapital och skulder",
-        3: "Intäkter",
-        4: "Kostnader för varor",
-        5: "Övriga externa kostnader",
-        6: "Övriga externa kostnader",
-        7: "Personalkostnader",
-        8: "Finansiella poster"
-    }
+    with tab1:
+        # Gruppera per kontoklass
+        classes = {}
+        for acc in accounts:
+            cls = acc.account_class
+            if cls not in classes:
+                classes[cls] = []
+            classes[cls].append(acc)
 
-    for cls in sorted(classes.keys()):
-        with st.expander(f"Klass {cls}: {class_names.get(cls, 'Övrigt')} ({len(classes[cls])} konton)"):
-            for acc in classes[cls]:
-                balance = service.get_account_balance(acc.id)
-                balance_str = f"{balance:,.2f} kr" if balance != 0 else "-"
-                st.write(f"**{acc.number}** {acc.name} | Saldo: {balance_str}")
+        class_names = {
+            1: "Tillgångar",
+            2: "Eget kapital och skulder",
+            3: "Intäkter",
+            4: "Kostnader för varor",
+            5: "Övriga externa kostnader",
+            6: "Övriga externa kostnader",
+            7: "Personalkostnader",
+            8: "Finansiella poster"
+        }
+
+        for cls in sorted(classes.keys()):
+            with st.expander(f"Klass {cls}: {class_names.get(cls, 'Övrigt')} ({len(classes[cls])} konton)"):
+                for acc in classes[cls]:
+                    balance = service.get_account_balance(acc.id)
+                    balance_str = f"{balance:,.2f} kr" if balance != 0 else "-"
+                    st.write(f"**{acc.number}** {acc.name} | Saldo: {balance_str}")
+
+    with tab2:
+        show_opening_balances(service, company_id, accounts)
+
+
+def show_opening_balances(service: AccountingService, company_id: int, accounts):
+    """Visa och redigera ingående balanser"""
+    from decimal import Decimal
+
+    st.subheader("Ingående balanser")
+    st.write("""
+    Ange ingående balanser för balanskonton (klass 1-2).
+    Dessa värden används som startvärden för räkenskapsåret.
+    """)
+
+    # Filtrera till balanskonton (klass 1-2)
+    balance_accounts = [a for a in accounts if a.is_balance_account]
+
+    # Visa summa för kontroll
+    total_assets = sum(a.opening_balance or Decimal(0) for a in balance_accounts if a.number.startswith('1'))
+    total_liabilities = sum(a.opening_balance or Decimal(0) for a in balance_accounts if a.number.startswith('2'))
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Tillgångar (IB)", f"{total_assets:,.2f} kr")
+    with col2:
+        st.metric("EK & Skulder (IB)", f"{total_liabilities:,.2f} kr")
+    with col3:
+        diff = total_assets - total_liabilities
+        if diff == 0:
+            st.metric("Differens", "0 kr", delta="Balanserar")
+        else:
+            st.metric("Differens", f"{diff:,.2f} kr", delta="Balanserar EJ", delta_color="inverse")
+
+    st.divider()
+
+    # Snabbredigering av konton med saldo eller vanliga balanskonton
+    st.write("### Ange ingående balanser")
+
+    # Hämta db-session från service
+    db = service.db
+
+    # Visa tillgångar (klass 1)
+    st.write("#### Tillgångar (klass 1)")
+    assets = [a for a in balance_accounts if a.number.startswith('1')]
+
+    for acc in assets:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{acc.number}** {acc.name}")
+        with col2:
+            current_balance = float(acc.opening_balance or 0)
+            new_balance = st.number_input(
+                f"IB {acc.number}",
+                value=current_balance,
+                step=100.0,
+                format="%.2f",
+                key=f"ib_{acc.number}",
+                label_visibility="collapsed"
+            )
+            if new_balance != current_balance:
+                acc.opening_balance = Decimal(str(new_balance))
+                db.commit()
+                st.rerun()
+
+    st.write("#### Eget kapital och skulder (klass 2)")
+    liabilities = [a for a in balance_accounts if a.number.startswith('2')]
+
+    for acc in liabilities:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{acc.number}** {acc.name}")
+        with col2:
+            current_balance = float(acc.opening_balance or 0)
+            new_balance = st.number_input(
+                f"IB {acc.number}",
+                value=current_balance,
+                step=100.0,
+                format="%.2f",
+                key=f"ib_{acc.number}",
+                label_visibility="collapsed"
+            )
+            if new_balance != current_balance:
+                acc.opening_balance = Decimal(str(new_balance))
+                db.commit()
+                st.rerun()
+
+    st.divider()
+
+    # Nollställ alla ingående balanser
+    if st.button("Nollställ alla ingående balanser", type="secondary"):
+        for acc in balance_accounts:
+            acc.opening_balance = Decimal(0)
+        db.commit()
+        st.success("Alla ingående balanser nollställda!")
+        st.rerun()
 
 
 def show_reports(service: AccountingService):
@@ -1948,7 +2048,10 @@ def show_company_info(service, db, company):
     with col2:
         # Visa logotyp
         if company.logo:
-            st.image(company.logo, width=150, caption="Företagslogotyp")
+            # Konvertera från memoryview/bytes till bytes om nödvändigt
+            logo_bytes = bytes(company.logo) if company.logo else None
+            if logo_bytes:
+                st.image(logo_bytes, width=150, caption="Företagslogotyp")
         else:
             st.info("Ingen logotyp uppladdad")
 

@@ -222,6 +222,12 @@ class SIEParser:
         - #TRANS 1930 {} -1000.00
         - #TRANS 1930 {"1" "100"} 1000.00 "" "" 0
         - #TRANS 1930 {} 1000,00
+
+        I SIE-format:
+        - Positiv = debet (ökning för tillgångar/kostnader)
+        - Negativ = kredit (ökning för skulder/EK/intäkter)
+
+        Vi sparar alltid absoluta värden i debit/credit-kolumnerna.
         """
         # Ta bort #TRANS prefix
         line = line.replace('#TRANS', '').strip()
@@ -248,6 +254,8 @@ class SIEParser:
                 amount_str = amount_str.replace(' ', '').replace(',', '.')
                 amount = Decimal(amount_str)
 
+                # I SIE-format: positiv = debet, negativ = kredit
+                # Vi sparar alltid positiva värden i rätt kolumn
                 if amount >= 0:
                     verification.lines.append({
                         'account_number': account_number,
@@ -412,7 +420,16 @@ class SIEImporter:
         return fiscal_year
 
     def _import_opening_balances(self, company_id: int, balances: dict):
-        """Importera ingående balanser"""
+        """
+        Importera ingående balanser
+
+        I SIE-format:
+        - Positiv = debetsaldo (naturligt för tillgångar 1xxx, kostnader 4-8xxx)
+        - Negativ = kreditsaldo (naturligt för skulder/EK 2xxx, intäkter 3xxx)
+
+        Vi lagrar alltid det absoluta värdet. Systemet använder kontotyp
+        för att avgöra om det är debet eller kredit vid beräkning.
+        """
         for account_number, balance in balances.items():
             account = self.db.query(Account).filter(
                 Account.company_id == company_id,
@@ -420,7 +437,20 @@ class SIEImporter:
             ).first()
 
             if account:
-                account.opening_balance = balance
+                # För balanskonton (1xxx, 2xxx) behöver vi hantera tecknet korrekt
+                # Tillgångar (1xxx): positivt värde i SIE = debetsaldo (behåll som det är)
+                # Skulder/EK (2xxx): negativt värde i SIE = kreditsaldo (gör positivt)
+                # Intäkter (3xxx): negativt = kreditsaldo (gör positivt)
+                # Kostnader (4-8xxx): positivt = debetsaldo (behåll som det är)
+                first_digit = account_number[0] if account_number else '0'
+
+                if first_digit in ['2', '3']:
+                    # Skulder, EK och intäkter: SIE har ofta negativa värden
+                    # Vi lagrar absolut värde (positivt)
+                    account.opening_balance = abs(balance)
+                else:
+                    # Tillgångar och kostnader: behåll som det är
+                    account.opening_balance = balance
 
         self.db.commit()
 
