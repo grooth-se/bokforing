@@ -1103,7 +1103,7 @@ def show_assets(service: AccountingService, db):
 
     dep_service = DepreciationService(db)
 
-    tab1, tab2, tab3 = st.tabs(["Tillgångslista", "Lägg till tillgång", "Kör avskrivningar"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Tillgångslista", "Lägg till tillgång", "Aktieinnehav", "Kör avskrivningar"])
 
     with tab1:
         st.subheader("Registrerade tillgångar")
@@ -1224,6 +1224,9 @@ def show_assets(service: AccountingService, db):
                         st.error(f"Fel: {e}")
 
     with tab3:
+        show_shareholdings(service, db, company_id)
+
+    with tab4:
         st.subheader("Kör periodavskrivningar")
 
         fiscal_years = service.get_fiscal_years(company_id)
@@ -1266,6 +1269,179 @@ def show_assets(service: AccountingService, db):
 
             except Exception as e:
                 st.error(f"Fel vid avskrivning: {e}")
+
+
+def show_shareholdings(service, db, company_id: int):
+    """Visa och hantera aktieinnehav i onoterade bolag"""
+    from app.models import Shareholding, ShareholdingType, ShareholdingTransaction
+    from decimal import Decimal
+    from datetime import date
+
+    st.subheader("Aktieinnehav i onoterade bolag")
+
+    st.write("""
+    Hantera aktieinnehav i dotterbolag, intresseföretag och övriga onoterade aktier.
+    """)
+
+    # Lista befintliga innehav
+    shareholdings = (
+        db.query(Shareholding)
+        .filter(Shareholding.company_id == company_id)
+        .order_by(Shareholding.holding_type, Shareholding.target_company_name)
+        .all()
+    )
+
+    if shareholdings:
+        # Gruppera per typ
+        grouped = {}
+        for sh in shareholdings:
+            if sh.holding_type not in grouped:
+                grouped[sh.holding_type] = []
+            grouped[sh.holding_type].append(sh)
+
+        for holding_type, holdings in grouped.items():
+            st.write(f"**{holding_type.value}:**")
+
+            for sh in holdings:
+                status = "Aktivt" if sh.is_active else "Avyttrat"
+                with st.expander(f"{sh.target_company_name} ({sh.ownership_percentage or 0:.1f}%) - {status}"):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.write(f"**Org.nummer:** {sh.target_org_number or 'Ej angivet'}")
+                        st.write(f"**Land:** {sh.target_country}")
+                        st.write(f"**Antal aktier:** {sh.num_shares:,}")
+                        if sh.total_shares_in_target:
+                            st.write(f"**Totalt aktier i bolaget:** {sh.total_shares_in_target:,}")
+                        st.write(f"**Ägarandel:** {sh.ownership_percentage or 0:.2f}%")
+                        if sh.voting_percentage:
+                            st.write(f"**Röstandel:** {sh.voting_percentage:.2f}%")
+
+                    with col2:
+                        st.write(f"**Anskaffningsdatum:** {sh.acquisition_date}")
+                        st.write(f"**Anskaffningsvärde:** {sh.acquisition_cost:,.2f} kr")
+                        st.write(f"**Bokfört värde:** {sh.book_value:,.2f} kr")
+                        if sh.total_impairment > 0:
+                            st.write(f"**Nedskrivningar:** {sh.total_impairment:,.2f} kr")
+                        if sh.market_value:
+                            st.write(f"**Marknadsvärde:** {sh.market_value:,.2f} kr")
+                        if sh.total_dividends_received > 0:
+                            st.write(f"**Erhållna utdelningar:** {sh.total_dividends_received:,.2f} kr")
+
+                    if sh.disposal_date:
+                        st.divider()
+                        st.write(f"**Avyttrad:** {sh.disposal_date}")
+                        if sh.disposal_amount:
+                            st.write(f"**Försäljningspris:** {sh.disposal_amount:,.2f} kr")
+                        if sh.disposal_gain_loss:
+                            result_type = "Vinst" if sh.disposal_gain_loss > 0 else "Förlust"
+                            st.write(f"**{result_type}:** {abs(sh.disposal_gain_loss):,.2f} kr")
+
+                    if sh.notes:
+                        st.write(f"**Anteckningar:** {sh.notes}")
+
+                    # Transaktionshistorik
+                    transactions = (
+                        db.query(ShareholdingTransaction)
+                        .filter(ShareholdingTransaction.shareholding_id == sh.id)
+                        .order_by(ShareholdingTransaction.transaction_date.desc())
+                        .all()
+                    )
+
+                    if transactions:
+                        st.divider()
+                        st.write("**Transaktioner:**")
+                        for tx in transactions:
+                            type_labels = {
+                                'purchase': 'Köp',
+                                'sale': 'Försäljning',
+                                'dividend': 'Utdelning',
+                                'impairment': 'Nedskrivning',
+                                'reversal': 'Återföring'
+                            }
+                            st.caption(f"{tx.transaction_date} - {type_labels.get(tx.transaction_type, tx.transaction_type)}: {tx.amount:,.2f} kr")
+
+    else:
+        st.info("Inga aktieinnehav registrerade")
+
+    st.divider()
+
+    # Lägg till nytt innehav
+    st.write("**Registrera nytt aktieinnehav**")
+
+    with st.form("new_shareholding"):
+        target_name = st.text_input("Bolagets namn")
+        target_org = st.text_input("Organisationsnummer", placeholder="XXXXXX-XXXX")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            holding_type = st.selectbox(
+                "Typ av innehav",
+                options=[ht for ht in ShareholdingType],
+                format_func=lambda x: x.value
+            )
+            target_country = st.text_input("Land", value="Sverige")
+            acq_date = st.date_input("Anskaffningsdatum", value=date.today())
+            acq_cost = st.number_input("Anskaffningsvärde (kr)", min_value=0.0, step=1000.0)
+
+        with col2:
+            num_shares = st.number_input("Antal aktier", min_value=1, step=1)
+            total_shares = st.number_input("Totalt antal aktier i bolaget (valfritt)", min_value=0, step=1)
+            ownership_pct = st.number_input("Ägarandel (%)", min_value=0.0, max_value=100.0, step=0.01)
+            voting_pct = st.number_input("Röstandel (%, valfritt)", min_value=0.0, max_value=100.0, step=0.01)
+
+        # Koppling till konto
+        accounts = service.get_accounts(company_id)
+        account_options = {f"{a.number} - {a.name}": a.id for a in accounts if a.number.startswith('13')}
+        selected_account = st.selectbox(
+            "Tillgångskonto",
+            options=["Inget"] + list(account_options.keys()),
+            help="Ex: 1310 Andelar i koncernföretag"
+        )
+
+        notes = st.text_area("Anteckningar")
+
+        if st.form_submit_button("Registrera innehav", type="primary"):
+            if target_name and num_shares > 0 and acq_cost > 0:
+                new_sh = Shareholding(
+                    company_id=company_id,
+                    target_company_name=target_name,
+                    target_org_number=target_org if target_org else None,
+                    target_country=target_country,
+                    holding_type=holding_type,
+                    num_shares=num_shares,
+                    total_shares_in_target=total_shares if total_shares > 0 else None,
+                    ownership_percentage=Decimal(str(ownership_pct)),
+                    voting_percentage=Decimal(str(voting_pct)) if voting_pct > 0 else None,
+                    acquisition_date=acq_date,
+                    acquisition_cost=Decimal(str(acq_cost)),
+                    acquisition_cost_per_share=Decimal(str(acq_cost / num_shares)),
+                    book_value=Decimal(str(acq_cost)),
+                    asset_account_id=account_options.get(selected_account) if selected_account != "Inget" else None,
+                    is_active=True,
+                    notes=notes if notes else None
+                )
+
+                db.add(new_sh)
+
+                # Skapa initialtransaktion
+                init_tx = ShareholdingTransaction(
+                    shareholding_id=new_sh.id,
+                    transaction_type='purchase',
+                    transaction_date=acq_date,
+                    num_shares=num_shares,
+                    amount=Decimal(str(acq_cost)),
+                    price_per_share=Decimal(str(acq_cost / num_shares)),
+                    description=f"Initialt köp av {num_shares} aktier i {target_name}"
+                )
+                db.add(init_tx)
+
+                db.commit()
+                st.success(f"Aktieinnehav i {target_name} registrerat!")
+                st.rerun()
+            else:
+                st.error("Fyll i namn, antal aktier och anskaffningsvärde")
 
 
 def show_closing(service: AccountingService, db):
@@ -1419,29 +1595,500 @@ def show_settings(service: AccountingService):
         st.info("Välj ett företag först.")
         return
 
+    from app.models import get_db, CompanyDocument, DocumentType, AnnualReport
+    from datetime import date
+    import base64
+
+    db = next(get_db())
     company = service.get_company(company_id)
 
+    # Flikar för olika inställningar
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Företagsuppgifter",
+        "Dokument",
+        "Årsredovisningar",
+        "Räkenskapsår"
+    ])
+
+    with tab1:
+        show_company_info(service, db, company)
+
+    with tab2:
+        show_company_documents(db, company_id)
+
+    with tab3:
+        show_annual_reports(service, db, company_id)
+
+    with tab4:
+        show_fiscal_years_settings(service, company_id)
+
+    db.close()
+
+
+def show_company_info(service, db, company):
+    """Visa och redigera företagsuppgifter inkl logotyp"""
+    import base64
+
     st.subheader(f"Företag: {company.name}")
-    st.write(f"**Organisationsnummer:** {company.org_number}")
-    st.write(f"**Redovisningsstandard:** {company.accounting_standard.value}")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.write(f"**Organisationsnummer:** {company.org_number}")
+        st.write(f"**Redovisningsstandard:** {company.accounting_standard.value}")
+
+        if company.address:
+            st.write(f"**Adress:** {company.address}")
+        if company.postal_code and company.city:
+            st.write(f"**Postadress:** {company.postal_code} {company.city}")
+        if company.email:
+            st.write(f"**E-post:** {company.email}")
+        if company.phone:
+            st.write(f"**Telefon:** {company.phone}")
+        if company.website:
+            st.write(f"**Webbplats:** {company.website}")
+
+    with col2:
+        # Visa logotyp
+        if company.logo:
+            st.image(company.logo, width=150, caption="Företagslogotyp")
+        else:
+            st.info("Ingen logotyp uppladdad")
 
     st.divider()
 
-    # Räkenskapsår
+    # Redigera företagsuppgifter
+    with st.expander("Redigera företagsuppgifter"):
+        with st.form("edit_company"):
+            name = st.text_input("Företagsnamn", value=company.name)
+            address = st.text_input("Gatuadress", value=company.address or "")
+            col1, col2 = st.columns(2)
+            with col1:
+                postal_code = st.text_input("Postnummer", value=company.postal_code or "")
+            with col2:
+                city = st.text_input("Ort", value=company.city or "")
+            email = st.text_input("E-post", value=company.email or "")
+            phone = st.text_input("Telefon", value=company.phone or "")
+            website = st.text_input("Webbplats", value=company.website or "")
+
+            if st.form_submit_button("Spara ändringar"):
+                company.name = name
+                company.address = address
+                company.postal_code = postal_code
+                company.city = city
+                company.email = email
+                company.phone = phone
+                company.website = website
+                db.commit()
+                st.success("Uppgifter uppdaterade!")
+                st.rerun()
+
+    # Ladda upp logotyp
+    st.write("**Logotyp**")
+    uploaded_logo = st.file_uploader(
+        "Ladda upp logotyp",
+        type=['png', 'jpg', 'jpeg', 'svg'],
+        help="Rekommenderad storlek: 200x200 pixlar. Visas i rapporter."
+    )
+
+    if uploaded_logo:
+        # Förhandsgranska
+        st.image(uploaded_logo, width=150, caption="Förhandsgranskning")
+
+        if st.button("Spara logotyp", type="primary"):
+            logo_data = uploaded_logo.read()
+            company.logo = logo_data
+            company.logo_filename = uploaded_logo.name
+            company.logo_mimetype = uploaded_logo.type
+            db.commit()
+            st.success("Logotyp sparad!")
+            st.rerun()
+
+    if company.logo:
+        if st.button("Ta bort logotyp"):
+            company.logo = None
+            company.logo_filename = None
+            company.logo_mimetype = None
+            db.commit()
+            st.success("Logotyp borttagen!")
+            st.rerun()
+
+
+def show_company_documents(db, company_id: int):
+    """Visa och hantera företagsdokument med versionshistorik"""
+    from app.models import CompanyDocument, DocumentType
+    from datetime import date
+
+    st.subheader("Företagsdokument")
+
+    st.write("""
+    Ladda upp viktiga dokument som registreringsbevis, F-skattebevis, bolagsordning etc.
+    Dokumenten versionshanteras automatiskt - gamla versioner sparas som historik.
+    """)
+
+    # Lista befintliga dokument
+    documents = (
+        db.query(CompanyDocument)
+        .filter(CompanyDocument.company_id == company_id, CompanyDocument.is_current == True)
+        .order_by(CompanyDocument.document_type, CompanyDocument.uploaded_at.desc())
+        .all()
+    )
+
+    if documents:
+        for doc in documents:
+            with st.expander(f"{doc.document_type.value}: {doc.name}"):
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    st.write(f"**Filnamn:** {doc.filename}")
+                    st.write(f"**Storlek:** {doc.file_size / 1024:.1f} KB")
+                    st.write(f"**Uppladdad:** {doc.uploaded_at.strftime('%Y-%m-%d %H:%M')}")
+                    st.write(f"**Version:** {doc.version}")
+
+                    if doc.valid_from:
+                        st.write(f"**Giltig från:** {doc.valid_from}")
+                    if doc.valid_until:
+                        st.write(f"**Giltig till:** {doc.valid_until}")
+                    if doc.issuer:
+                        st.write(f"**Utfärdare:** {doc.issuer}")
+                    if doc.reference_number:
+                        st.write(f"**Referens:** {doc.reference_number}")
+                    if doc.notes:
+                        st.write(f"**Anteckningar:** {doc.notes}")
+
+                with col2:
+                    # Ladda ner
+                    st.download_button(
+                        "Ladda ner",
+                        data=doc.file_data,
+                        file_name=doc.filename,
+                        mime=doc.mimetype,
+                        key=f"dl_{doc.id}"
+                    )
+
+                # Visa versionshistorik
+                previous_versions = (
+                    db.query(CompanyDocument)
+                    .filter(
+                        CompanyDocument.company_id == company_id,
+                        CompanyDocument.document_type == doc.document_type,
+                        CompanyDocument.is_current == False
+                    )
+                    .order_by(CompanyDocument.version.desc())
+                    .all()
+                )
+
+                if previous_versions:
+                    st.write("**Tidigare versioner:**")
+                    for old_doc in previous_versions:
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.caption(f"v{old_doc.version} - {old_doc.uploaded_at.strftime('%Y-%m-%d')}")
+                        with col2:
+                            st.download_button(
+                                "Ladda ner",
+                                data=old_doc.file_data,
+                                file_name=f"v{old_doc.version}_{old_doc.filename}",
+                                mime=old_doc.mimetype,
+                                key=f"dl_old_{old_doc.id}"
+                            )
+    else:
+        st.info("Inga dokument uppladdade")
+
+    st.divider()
+
+    # Ladda upp nytt dokument
+    st.write("**Ladda upp nytt dokument**")
+
+    with st.form("upload_document"):
+        doc_type = st.selectbox(
+            "Dokumenttyp",
+            options=[dt for dt in DocumentType],
+            format_func=lambda x: x.value
+        )
+
+        name = st.text_input("Beskrivande namn", placeholder="T.ex. 'Registreringsbevis 2024'")
+
+        uploaded_file = st.file_uploader(
+            "Välj fil",
+            type=['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx']
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            valid_from = st.date_input("Giltig från", value=date.today())
+        with col2:
+            valid_until = st.date_input("Giltig till (valfritt)", value=None)
+
+        issuer = st.text_input("Utfärdare", placeholder="T.ex. 'Bolagsverket'")
+        reference = st.text_input("Referensnummer", placeholder="Ärendenummer etc.")
+        notes = st.text_area("Anteckningar")
+
+        if st.form_submit_button("Ladda upp", type="primary"):
+            if uploaded_file and name:
+                file_data = uploaded_file.read()
+
+                # Kolla om det finns ett befintligt dokument av samma typ
+                existing = (
+                    db.query(CompanyDocument)
+                    .filter(
+                        CompanyDocument.company_id == company_id,
+                        CompanyDocument.document_type == doc_type,
+                        CompanyDocument.is_current == True
+                    )
+                    .first()
+                )
+
+                new_version = 1
+                if existing:
+                    # Markera gamla som icke-aktuell
+                    existing.is_current = False
+                    new_version = existing.version + 1
+
+                # Skapa nytt dokument
+                new_doc = CompanyDocument(
+                    company_id=company_id,
+                    document_type=doc_type,
+                    name=name,
+                    file_data=file_data,
+                    filename=uploaded_file.name,
+                    mimetype=uploaded_file.type,
+                    file_size=len(file_data),
+                    version=new_version,
+                    parent_id=existing.id if existing else None,
+                    is_current=True,
+                    valid_from=valid_from,
+                    valid_until=valid_until if valid_until else None,
+                    issuer=issuer if issuer else None,
+                    reference_number=reference if reference else None,
+                    notes=notes if notes else None
+                )
+
+                db.add(new_doc)
+                db.commit()
+
+                if existing:
+                    st.success(f"Dokument uppdaterat (version {new_version})!")
+                else:
+                    st.success("Dokument uppladdat!")
+                st.rerun()
+            else:
+                st.error("Fyll i namn och välj en fil")
+
+
+def show_annual_reports(service, db, company_id: int):
+    """Visa register över inskickade årsredovisningar"""
+    from app.models import AnnualReport
+    from datetime import date
+
+    st.subheader("Årsredovisningar")
+
+    st.write("""
+    Register över inskickade årsredovisningar till Bolagsverket.
+    Håll reda på status och viktiga datum.
+    """)
+
+    # Hämta räkenskapsår
+    fiscal_years = service.get_fiscal_years(company_id)
+
+    # Lista befintliga årsredovisningar
+    reports = (
+        db.query(AnnualReport)
+        .filter(AnnualReport.company_id == company_id)
+        .order_by(AnnualReport.fiscal_year_end.desc())
+        .all()
+    )
+
+    if reports:
+        for report in reports:
+            status_icons = {
+                'draft': '📝',
+                'submitted': '📤',
+                'registered': '✅',
+                'rejected': '❌'
+            }
+            status_icon = status_icons.get(report.status, '❓')
+
+            with st.expander(f"{status_icon} {report.fiscal_year_start} - {report.fiscal_year_end}"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**Status:** {report.status.capitalize()}")
+                    if report.submitted_date:
+                        st.write(f"**Inskickad:** {report.submitted_date}")
+                    if report.registered_date:
+                        st.write(f"**Registrerad:** {report.registered_date}")
+                    if report.bolagsverket_reference:
+                        st.write(f"**Bolagsverkets ref:** {report.bolagsverket_reference}")
+
+                with col2:
+                    if report.revenue:
+                        st.metric("Omsättning", f"{report.revenue:,} kr")
+                    if report.profit_loss:
+                        st.metric("Resultat", f"{report.profit_loss:,} kr")
+
+                # Revisorns uppgifter
+                if report.auditor_name:
+                    st.write(f"**Revisor:** {report.auditor_name}")
+                    if report.auditor_opinion:
+                        opinions = {
+                            'clean': 'Ren revisionsberättelse',
+                            'qualified': 'Med anmärkning',
+                            'adverse': 'Avvikande mening',
+                            'disclaimer': 'Avstår uttalande'
+                        }
+                        st.write(f"**Utlåtande:** {opinions.get(report.auditor_opinion, report.auditor_opinion)}")
+
+                # Ladda ner årsredovisning
+                if report.report_file:
+                    st.download_button(
+                        "Ladda ner årsredovisning",
+                        data=report.report_file,
+                        file_name=report.report_filename or f"arsredovisning_{report.fiscal_year_end.year}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_ar_{report.id}"
+                    )
+
+                if report.notes:
+                    st.write(f"**Anteckningar:** {report.notes}")
+
+                # Uppdatera status
+                st.divider()
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    new_status = st.selectbox(
+                        "Ändra status",
+                        options=['draft', 'submitted', 'registered', 'rejected'],
+                        index=['draft', 'submitted', 'registered', 'rejected'].index(report.status),
+                        key=f"status_{report.id}"
+                    )
+
+                with col2:
+                    new_submitted = st.date_input(
+                        "Inskickad datum",
+                        value=report.submitted_date,
+                        key=f"submitted_{report.id}"
+                    )
+
+                with col3:
+                    new_registered = st.date_input(
+                        "Registrerad datum",
+                        value=report.registered_date,
+                        key=f"registered_{report.id}"
+                    )
+
+                if st.button("Spara ändringar", key=f"save_{report.id}"):
+                    report.status = new_status
+                    report.submitted_date = new_submitted if new_submitted else None
+                    report.registered_date = new_registered if new_registered else None
+                    db.commit()
+                    st.success("Uppdaterat!")
+                    st.rerun()
+    else:
+        st.info("Inga årsredovisningar registrerade")
+
+    st.divider()
+
+    # Lägg till ny årsredovisning
+    st.write("**Registrera ny årsredovisning**")
+
+    with st.form("new_annual_report"):
+        # Välj räkenskapsår
+        if fiscal_years:
+            fy_options = {f"{fy.start_date} - {fy.end_date}": fy for fy in fiscal_years}
+            selected_fy = st.selectbox("Räkenskapsår", options=list(fy_options.keys()))
+            fiscal_year = fy_options[selected_fy]
+        else:
+            st.warning("Skapa ett räkenskapsår först")
+            fiscal_year = None
+
+        col1, col2 = st.columns(2)
+        with col1:
+            revenue = st.number_input("Omsättning (kr)", min_value=0, step=1000)
+            profit_loss = st.number_input("Resultat (kr)", step=1000)
+        with col2:
+            total_assets = st.number_input("Balansomslutning (kr)", min_value=0, step=1000)
+            equity = st.number_input("Eget kapital (kr)", step=1000)
+
+        num_employees = st.number_input("Antal anställda", min_value=0, step=1)
+
+        st.write("**Revisor**")
+        auditor_name = st.text_input("Revisorns namn")
+        auditor_opinion = st.selectbox(
+            "Revisionsutlåtande",
+            options=[None, 'clean', 'qualified', 'adverse', 'disclaimer'],
+            format_func=lambda x: {
+                None: "Ej granskat",
+                'clean': 'Ren revisionsberättelse',
+                'qualified': 'Med anmärkning',
+                'adverse': 'Avvikande mening',
+                'disclaimer': 'Avstår uttalande'
+            }.get(x, x)
+        )
+
+        report_file = st.file_uploader("Årsredovisning (PDF)", type=['pdf'])
+
+        notes = st.text_area("Anteckningar")
+
+        if st.form_submit_button("Registrera", type="primary"):
+            if fiscal_year:
+                # Kolla om det redan finns en för detta räkenskapsår
+                existing = (
+                    db.query(AnnualReport)
+                    .filter(
+                        AnnualReport.company_id == company_id,
+                        AnnualReport.fiscal_year_id == fiscal_year.id
+                    )
+                    .first()
+                )
+
+                if existing:
+                    st.error("Det finns redan en årsredovisning för detta räkenskapsår")
+                else:
+                    new_report = AnnualReport(
+                        company_id=company_id,
+                        fiscal_year_id=fiscal_year.id,
+                        fiscal_year_start=fiscal_year.start_date,
+                        fiscal_year_end=fiscal_year.end_date,
+                        status='draft',
+                        revenue=revenue if revenue else None,
+                        profit_loss=profit_loss if profit_loss else None,
+                        total_assets=total_assets if total_assets else None,
+                        equity=equity if equity else None,
+                        num_employees=num_employees if num_employees else None,
+                        auditor_name=auditor_name if auditor_name else None,
+                        auditor_opinion=auditor_opinion,
+                        notes=notes if notes else None
+                    )
+
+                    if report_file:
+                        new_report.report_file = report_file.read()
+                        new_report.report_filename = report_file.name
+
+                    db.add(new_report)
+                    db.commit()
+                    st.success("Årsredovisning registrerad!")
+                    st.rerun()
+
+
+def show_fiscal_years_settings(service, company_id: int):
+    """Visa och hantera räkenskapsår"""
+    from datetime import date
+
     st.subheader("Räkenskapsår")
 
     fiscal_years = service.get_fiscal_years(company_id)
 
     if fiscal_years:
         for fy in fiscal_years:
-            status = "🔒 Stängt" if fy.is_closed else "✓ Aktivt"
+            status = "🔒 Stängt" if fy.is_closed else "✅ Aktivt"
             st.write(f"**{fy.start_date} - {fy.end_date}** {status}")
     else:
         st.info("Inga räkenskapsår")
 
     with st.form("new_fiscal_year"):
         st.write("**Skapa nytt räkenskapsår**")
-        from datetime import date
         start = st.date_input("Startdatum", value=date(date.today().year, 1, 1))
         end = st.date_input("Slutdatum", value=date(date.today().year, 12, 31))
 

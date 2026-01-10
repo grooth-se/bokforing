@@ -9,6 +9,8 @@ from app.models.transaction import Transaction, TransactionLine
 from app.models.voucher import Voucher
 from app.models.asset import Asset, AssetDepreciation, AssetType, DepreciationMethod
 from app.models.tax_declaration import TaxDeclaration
+from app.models.document import CompanyDocument, DocumentType, AnnualReport
+from app.models.shareholding import Shareholding, ShareholdingType, ShareholdingTransaction
 
 __all__ = [
     "Base",
@@ -26,4 +28,10 @@ __all__ = [
     "AssetType",
     "DepreciationMethod",
     "TaxDeclaration",
+    "CompanyDocument",
+    "DocumentType",
+    "AnnualReport",
+    "Shareholding",
+    "ShareholdingType",
+    "ShareholdingTransaction",
 ]

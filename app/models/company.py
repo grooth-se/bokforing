@@ -2,7 +2,7 @@
 Företagsmodell - Multi-tenant stöd
 """
 from datetime import date
-from sqlalchemy import Column, Integer, String, Date, Enum
+from sqlalchemy import Column, Integer, String, Date, Enum, LargeBinary, Text
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 from app.config import AccountingStandard
@@ -33,8 +33,16 @@ class Company(Base):
 
     # Kontaktuppgifter
     address = Column(String(500))
+    postal_code = Column(String(20))
+    city = Column(String(100))
     email = Column(String(255))
     phone = Column(String(50))
+    website = Column(String(255))
+
+    # Logotyp (lagras som binärdata)
+    logo = Column(LargeBinary, nullable=True)
+    logo_filename = Column(String(255), nullable=True)
+    logo_mimetype = Column(String(100), nullable=True)
 
     # Metadata
     created_at = Column(Date, default=date.today)
@@ -44,6 +52,9 @@ class Company(Base):
     fiscal_years = relationship("FiscalYear", back_populates="company", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="company", cascade="all, delete-orphan")
     assets = relationship("Asset", back_populates="company", cascade="all, delete-orphan")
+    documents = relationship("CompanyDocument", back_populates="company", cascade="all, delete-orphan")
+    annual_reports = relationship("AnnualReport", back_populates="company", cascade="all, delete-orphan")
+    shareholdings = relationship("Shareholding", back_populates="company", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Company(id={self.id}, name='{self.name}', org={self.org_number})>"
